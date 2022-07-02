@@ -49,6 +49,7 @@ fn main() {
 
     let start = std::time::Instant::now();
 
+    let mut shifting = false;
     let mut max_sk: Vec<u16> = Vec::new();
 
     for line in test_data.lines() {
@@ -68,8 +69,8 @@ fn main() {
         }
 
         let char_values = get_char_values(&test_string);
-        let cea = get_collation_element_array(char_values);
-        let sk = get_sort_key(&cea);
+        let cea = get_collation_element_array(char_values, shifting);
+        let sk = get_sort_key(&cea, shifting);
 
         let comparison = compare_sort_keys(&sk, &max_sk);
         if comparison == Ordering::Less {
@@ -86,11 +87,73 @@ fn main() {
     println!("Passed CollationTest_NON_IGNORABLE");
     println!("(with a few caveats...)");
     println!("Compared {} lines in {:?}", total_lines, duration);
+
+    println!();
+    println!("Now trying CollationTest_SHIFTED");
+
+    let second_test_data =
+        std::fs::read_to_string("test-data/CollationTest_SHIFTED_SHORT.txt").unwrap();
+
+    shifting = true;
+    let mut max_test_string = String::new();
+    let mut max_char_values: Vec<u32> = Vec::new();
+    let mut max_cea: Vec<Vec<u16>> = Vec::new();
+    max_sk = Vec::new();
+
+    for (i, line) in second_test_data.lines().enumerate() {
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+
+        let hex_values: Vec<&str> = line.split(' ').collect();
+        let mut test_string = String::new();
+
+        for s in hex_values {
+            let val = u32::from_str_radix(s, 16).unwrap();
+            // This is BS, but we have to use an unsafe method because the tests deliberately
+            // introduce invalid character values.
+            let c = unsafe { std::char::from_u32_unchecked(val) };
+            test_string.push(c);
+        }
+
+        let char_values = get_char_values(&test_string);
+        let char_values_clone = char_values.clone();
+        let cea = get_collation_element_array(char_values, shifting);
+        let sk = get_sort_key(&cea, shifting);
+
+        let comparison = compare_sort_keys(&sk, &max_sk);
+        if comparison == Ordering::Less {
+            println!("Made it through {} lines before choking", i);
+            println!();
+
+            println!("Last passing line:");
+            println!("{}", second_test_data.lines().nth(i - 1).unwrap());
+            println!("“{}”", max_test_string);
+            println!("NFD chars: {:04X?}", max_char_values);
+            println!("CEA: {:X?}", max_cea);
+            println!("SK: {:X?}", max_sk);
+            println!();
+
+            println!("Failing line:");
+            println!("{}", line);
+            println!("“{}”", test_string);
+            println!("NFD chars: {:04X?}", char_values_clone);
+            println!("CEA: {:X?}", cea);
+            println!("SK: {:X?}", sk);
+
+            break;
+        }
+
+        max_test_string = test_string;
+        max_char_values = char_values_clone;
+        max_cea = cea;
+        max_sk = sk;
+    }
 }
 
-fn _collate(str_1: &str, str_2: &str) -> Ordering {
-    let sort_key_1 = _str_to_sort_key(str_1);
-    let sort_key_2 = _str_to_sort_key(str_2);
+fn _collate(str_1: &str, str_2: &str, shifting: bool) -> Ordering {
+    let sort_key_1 = _str_to_sort_key(str_1, shifting);
+    let sort_key_2 = _str_to_sort_key(str_2, shifting);
 
     let comparison = compare_sort_keys(&sort_key_1, &sort_key_2);
 
@@ -118,10 +181,10 @@ fn compare_sort_keys(a: &[u16], b: &[u16]) -> Ordering {
     Ordering::Equal
 }
 
-fn _str_to_sort_key(input: &str) -> Vec<u16> {
+fn _str_to_sort_key(input: &str, shifting: bool) -> Vec<u16> {
     let char_values = get_char_values(input);
-    let collation_element_array = get_collation_element_array(char_values);
-    get_sort_key(&collation_element_array)
+    let collation_element_array = get_collation_element_array(char_values, shifting);
+    get_sort_key(&collation_element_array, shifting)
 }
 
 fn get_char_values(input: &str) -> Vec<u32> {
@@ -132,9 +195,11 @@ fn get_char_values(input: &str) -> Vec<u32> {
 }
 
 // This function is where the "magic" happens (or the sausage is made?)
-fn get_collation_element_array(mut char_values: Vec<u32>) -> Vec<Vec<u16>> {
+fn get_collation_element_array(mut char_values: Vec<u32>, shifting: bool) -> Vec<Vec<u16>> {
     let mut collation_element_array: Vec<Vec<u16>> = Vec::new();
     let mut left: usize = 0;
+
+    let mut last_variable = false;
 
     'outer: while left < char_values.len() {
         // If left <= 3200 (0C80), only need to look one ahead
@@ -207,10 +272,48 @@ fn get_collation_element_array(mut char_values: Vec<u32>) -> Vec<Vec<u16>> {
                     }
                 }
 
+                // Not variable, primary weight non-zero: add fourth weight of 65_535; set
+                // last_variable to false
+                //
+                // Not following variable, primary weight zero, tertiary weight non-zero: add fourth
+                // weight of 65_535; set last_variable to false
+                //
+                // Variable: first three weights zeroed; fourth weight is former primary; set
+                // last_variable to true
+                //
+                // Following variable, primary weight zero, tertiary weight non-zero: all four
+                // weights zeroed; set last_variable to false
+                //
+                // All three weights already zero: add 0 fourth weight; set last_variable to false
+
                 // Otherwise, add the weights of the original subset we found
                 for weights in value {
-                    let weight_values = vec![weights.primary, weights.secondary, weights.tertiary];
-                    collation_element_array.push(weight_values);
+                    if shifting {
+                        // All weight vectors will have a fourth value added
+                        if weights.primary == 0 && weights.secondary == 0 && weights.tertiary == 0 {
+                            let weight_values = vec![0, 0, 0, 0];
+                            collation_element_array.push(weight_values);
+                            last_variable = false;
+                        } else if weights.variable {
+                            let weight_values = vec![0, 0, 0, weights.primary];
+                            collation_element_array.push(weight_values);
+                            last_variable = true;
+                        } else if last_variable && weights.primary == 0 && weights.tertiary != 0 {
+                            let weight_values = vec![0, 0, 0, 0];
+                            collation_element_array.push(weight_values);
+                            last_variable = false;
+                        } else {
+                            let weight_values =
+                                vec![weights.primary, weights.secondary, weights.tertiary, 65_535];
+                            collation_element_array.push(weight_values);
+                            last_variable = false;
+                        }
+                    } else {
+                        // Do normal shit
+                        let weight_values =
+                            vec![weights.primary, weights.secondary, weights.tertiary];
+                        collation_element_array.push(weight_values);
+                    }
                 }
 
                 // Increment and continue outer loop
@@ -284,10 +387,11 @@ fn get_collation_element_array(mut char_values: Vec<u32>) -> Vec<Vec<u16>> {
 }
 
 // We flatten a slice of u16 vecs to one u16 vec, according to UCA rules
-fn get_sort_key(collation_element_array: &[Vec<u16>]) -> Vec<u16> {
+fn get_sort_key(collation_element_array: &[Vec<u16>], shifting: bool) -> Vec<u16> {
+    let max_level = if shifting { 4 } else { 3 };
     let mut sort_key: Vec<u16> = Vec::new();
 
-    for i in 0..3 {
+    for i in 0..max_level {
         if i > 0 {
             sort_key.push(0);
         }
