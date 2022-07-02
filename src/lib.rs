@@ -172,7 +172,6 @@ pub fn get_collation_element_array(mut char_values: Vec<u32>, shifting: bool) ->
                                 {
                                     let weight_values = vec![0, 0, 0, 0];
                                     collation_element_array.push(weight_values);
-                                    last_variable = false;
                                 } else if weights.variable {
                                     let weight_values = vec![0, 0, 0, weights.primary];
                                     collation_element_array.push(weight_values);
@@ -183,7 +182,6 @@ pub fn get_collation_element_array(mut char_values: Vec<u32>, shifting: bool) ->
                                 {
                                     let weight_values = vec![0, 0, 0, 0];
                                     collation_element_array.push(weight_values);
-                                    last_variable = false;
                                 } else {
                                     let weight_values = vec![
                                         weights.primary,
@@ -234,7 +232,6 @@ pub fn get_collation_element_array(mut char_values: Vec<u32>, shifting: bool) ->
                         if weights.primary == 0 && weights.secondary == 0 && weights.tertiary == 0 {
                             let weight_values = vec![0, 0, 0, 0];
                             collation_element_array.push(weight_values);
-                            last_variable = false;
                         } else if weights.variable {
                             let weight_values = vec![0, 0, 0, weights.primary];
                             collation_element_array.push(weight_values);
@@ -242,7 +239,6 @@ pub fn get_collation_element_array(mut char_values: Vec<u32>, shifting: bool) ->
                         } else if last_variable && weights.primary == 0 && weights.tertiary != 0 {
                             let weight_values = vec![0, 0, 0, 0];
                             collation_element_array.push(weight_values);
-                            last_variable = false;
                         } else {
                             let weight_values =
                                 vec![weights.primary, weights.secondary, weights.tertiary, 65_535];
