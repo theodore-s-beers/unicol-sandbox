@@ -422,4 +422,51 @@ mod tests {
 
         assert_eq!(scrambled, sorted);
     }
+
+    #[test]
+    fn multi_script() {
+        let mut scrambled = [
+            "ｶ",
+            "ヵ",
+            "abc",
+            "abç",
+            "ab©",
+            "𝒶bc",
+            "abC",
+            "𝕒bc",
+            "File-3",
+            "ガ",
+            "が",
+            "äbc",
+            "カ",
+            "か",
+            "Abc",
+            "file-12",
+            "filé-110",
+        ];
+
+        scrambled.sort_by(|a, b| collate(a, b, true));
+
+        let sorted = [
+            "ab©",
+            "abc",
+            "abC",
+            "𝒶bc",
+            "𝕒bc",
+            "Abc",
+            "abç",
+            "äbc",
+            "filé-110",
+            "file-12",
+            "File-3",
+            "か",
+            "ヵ",
+            "カ",
+            "ｶ",
+            "が",
+            "ガ",
+        ];
+
+        assert_eq!(scrambled, sorted);
+    }
 }
