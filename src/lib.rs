@@ -89,17 +89,13 @@ pub fn get_char_values(input: &str) -> Vec<u32> {
 // This function is where the "magic" happens (or the sausage is made?)
 pub fn get_collation_element_array(mut char_values: Vec<u32>, shifting: bool) -> Vec<Vec<u16>> {
     let mut collation_element_array: Vec<Vec<u16>> = Vec::new();
-    let mut left: usize = 0;
 
+    let mut left: usize = 0;
     let mut last_variable = false;
 
     'outer: while left < char_values.len() {
         // If left <= 3200 (0C80), only need to look one ahead
-        #[allow(clippy::match_on_vec_items)]
-        let lookahead: usize = match char_values[left] {
-            x if x <= 3200 => 2,
-            _ => 3,
-        };
+        let lookahead: usize = if char_values[left] <= 3_200 { 2 } else { 3 };
 
         // But don't look past the end of the vec
         let mut right = if left + lookahead > char_values.len() {
@@ -127,41 +123,94 @@ pub fn get_collation_element_array(mut char_values: Vec<u32>, shifting: bool) ->
                 // over 0334 in the normalized version. Both 0306 and 0334 are non-blocking (if
                 // I've understood correctly).
 
-                let skip_index = right + 1;
-                // If there's enough space left in the slice...
-                if skip_index < char_values.len() {
-                    let next_char = char::from_u32(char_values[right]).unwrap();
-                    let next_ccc = get_canonical_combining_class(next_char);
+                let mut skip_index = if (right + 2) < char_values.len() {
+                    right + 2
+                } else if (right + 1) < char_values.len() {
+                    right + 1
+                } else {
+                    // This should skip all the stuff below
+                    right
+                };
 
-                    // If the next char (not the skip) is a non-starter...
-                    if next_ccc != CanonicalCombiningClass::NotReordered {
-                        let skip_char = char::from_u32(char_values[skip_index]).unwrap();
-                        let skip_ccc = get_canonical_combining_class(skip_char);
-
-                        // If the skip char is also a non-starter, and not blocked...
-                        if skip_ccc != CanonicalCombiningClass::NotReordered && next_ccc < skip_ccc
+                'inner: while skip_index > right {
+                    // We verify that all chars in the range right..skip_index are non-starters
+                    // If there are any starters in our range of interest, decrement and continue
+                    let interest_cohort = &char_values[right..skip_index];
+                    for elem in interest_cohort {
+                        let c = char::from_u32(*elem).unwrap();
+                        if get_canonical_combining_class(c) == CanonicalCombiningClass::NotReordered
                         {
-                            let new_subset =
-                                [subset, [char_values[skip_index]].as_slice()].concat();
-
-                            // If the new substring is found in the table...
-                            if let Some(new_value) = PARSED_BIN.get(&new_subset) {
-                                // Then add these weights instead
-                                for weights in new_value {
-                                    let weight_values =
-                                        vec![weights.primary, weights.secondary, weights.tertiary];
-                                    collation_element_array.push(weight_values);
-                                }
-
-                                // Remove the skip char
-                                char_values.remove(skip_index);
-
-                                // Increment and continue outer loop
-                                left += right - left;
-                                continue 'outer;
-                            }
+                            skip_index -= 1;
+                            continue 'inner;
                         }
                     }
+
+                    let left_of_skip = char::from_u32(char_values[skip_index - 1]).unwrap();
+                    let skip_char = char::from_u32(char_values[skip_index]).unwrap();
+
+                    let left_ccc = get_canonical_combining_class(left_of_skip);
+                    let skip_ccc = get_canonical_combining_class(skip_char);
+
+                    // If skip char is starting, or relationship between skip char and the one
+                    // preceding it is bad, decrement skip index and continue
+                    if skip_ccc == CanonicalCombiningClass::NotReordered || skip_ccc <= left_ccc {
+                        skip_index -= 1;
+                        continue;
+                    }
+
+                    let new_subset = [subset, [char_values[skip_index]].as_slice()].concat();
+
+                    // If the new subset is found in the table...
+                    if let Some(new_value) = PARSED_BIN.get(&new_subset) {
+                        // Then add these weights instead
+                        for weights in new_value {
+                            if shifting {
+                                // All weight vectors will have a fourth value added
+                                if weights.primary == 0
+                                    && weights.secondary == 0
+                                    && weights.tertiary == 0
+                                {
+                                    let weight_values = vec![0, 0, 0, 0];
+                                    collation_element_array.push(weight_values);
+                                    last_variable = false;
+                                } else if weights.variable {
+                                    let weight_values = vec![0, 0, 0, weights.primary];
+                                    collation_element_array.push(weight_values);
+                                    last_variable = true;
+                                } else if last_variable
+                                    && weights.primary == 0
+                                    && weights.tertiary != 0
+                                {
+                                    let weight_values = vec![0, 0, 0, 0];
+                                    collation_element_array.push(weight_values);
+                                    last_variable = false;
+                                } else {
+                                    let weight_values = vec![
+                                        weights.primary,
+                                        weights.secondary,
+                                        weights.tertiary,
+                                        65_535,
+                                    ];
+                                    collation_element_array.push(weight_values);
+                                    last_variable = false;
+                                }
+                            } else {
+                                // Do normal shit
+                                let weight_values =
+                                    vec![weights.primary, weights.secondary, weights.tertiary];
+                                collation_element_array.push(weight_values);
+                            }
+                        }
+
+                        // Remove the skip char
+                        char_values.remove(skip_index);
+
+                        // Increment and continue outer loop
+                        left += right - left;
+                        continue 'outer;
+                    }
+
+                    skip_index -= 1;
                 }
 
                 // Not variable, primary weight non-zero: add fourth weight of 65_535; set
@@ -264,11 +313,19 @@ pub fn get_collation_element_array(mut char_values: Vec<u32>, shifting: bool) ->
         bbbb |= 32_768;
 
         #[allow(clippy::cast_possible_truncation)]
-        let first_weights = vec![aaaa as u16, 32, 2];
+        let first_weights = if shifting {
+            vec![aaaa as u16, 32, 2, 65_535]
+        } else {
+            vec![aaaa as u16, 32, 2]
+        };
         collation_element_array.push(first_weights);
 
         #[allow(clippy::cast_possible_truncation)]
-        let second_weights = vec![bbbb as u16, 0, 0];
+        let second_weights = if shifting {
+            vec![bbbb as u16, 0, 0, 65_535]
+        } else {
+            vec![bbbb as u16, 0, 0]
+        };
         collation_element_array.push(second_weights);
 
         // Finally, increment and let outer loop continue
@@ -347,4 +404,26 @@ fn parse_keys() -> HashMap<Vec<u32>, Vec<Weights>> {
     std::fs::write("byte_dump", bytes).unwrap();
 
     map
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn deluge_shifted() {
+        let mut scrambled = [
+            "demark", "de-luge", "deluge", "de-Luge", "de luge", "de-luge", "deLuge", "de Luge",
+            "de-Luge", "death",
+        ];
+
+        scrambled.sort_by(|a, b| collate(a, b, true));
+
+        let sorted = [
+            "death", "de luge", "de-luge", "de-luge", "deluge", "de Luge", "de-Luge", "de-Luge",
+            "deLuge", "demark",
+        ];
+
+        assert_eq!(scrambled, sorted);
+    }
 }

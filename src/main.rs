@@ -11,7 +11,7 @@ fn main() {
 
     let start = std::time::Instant::now();
 
-    let mut shifting = false;
+    let shifting = false;
     let mut max_sk: Vec<u16> = Vec::new();
 
     for line in test_data.lines() {
@@ -47,22 +47,28 @@ fn main() {
     let total_lines = test_data.lines().count();
 
     println!("Passed CollationTest_NON_IGNORABLE");
-    println!("(with a few caveats...)");
     println!("Compared {} lines in {:?}", total_lines, duration);
-
     println!();
-    println!("Now trying CollationTest_SHIFTED");
 
     let second_test_data =
         std::fs::read_to_string("test-data/CollationTest_SHIFTED_SHORT.txt").unwrap();
 
-    shifting = true;
-    let mut max_test_string = String::new();
-    let mut max_char_values: Vec<u32> = Vec::new();
-    let mut max_cea: Vec<Vec<u16>> = Vec::new();
-    max_sk = Vec::new();
+    let start = std::time::Instant::now();
+
+    let shifting = true;
+    // let mut max_line = String::new();
+    // let mut max_test_string = String::new();
+    // let mut max_char_values: Vec<u32> = Vec::new();
+    // let mut max_cea: Vec<Vec<u16>> = Vec::new();
+    let mut max_sk = Vec::new();
+
+    let mut ignored: u8 = 0;
 
     for (i, line) in second_test_data.lines().enumerate() {
+        if i > 7 && line.starts_with('#') {
+            ignored += 1;
+        }
+
         if line.is_empty() || line.starts_with('#') {
             continue;
         }
@@ -79,36 +85,46 @@ fn main() {
         }
 
         let char_values = get_char_values(&test_string);
-        let char_values_clone = char_values.clone();
+        // let char_values_clone = char_values.clone();
         let cea = get_collation_element_array(char_values, shifting);
         let sk = get_sort_key(&cea, shifting);
 
         let comparison = compare_sort_keys(&sk, &max_sk);
         if comparison == Ordering::Less {
-            println!("Made it through {} lines before choking", i);
-            println!();
+            // println!("Made it to line {} before choking", i);
+            // println!();
 
-            println!("Last passing line:");
-            println!("{}", second_test_data.lines().nth(i - 1).unwrap());
-            println!("“{}”", max_test_string);
-            println!("NFD chars: {:04X?}", max_char_values);
-            println!("CEA: {:X?}", max_cea);
-            println!("SK: {:X?}", max_sk);
-            println!();
+            // println!("Last passing line:");
+            // println!("{}", max_line);
+            // println!("“{}”", max_test_string);
+            // println!("NFD chars: {:04X?}", max_char_values);
+            // println!("CEA: {:X?}", max_cea);
+            // println!("SK: {:X?}", max_sk);
+            // println!();
 
-            println!("Failing line:");
-            println!("{}", line);
-            println!("“{}”", test_string);
-            println!("NFD chars: {:04X?}", char_values_clone);
-            println!("CEA: {:X?}", cea);
-            println!("SK: {:X?}", sk);
+            // println!("Failing line:");
+            // println!("{}", line);
+            // println!("“{}”", test_string);
+            // println!("NFD chars: {:04X?}", char_values_clone);
+            // println!("CEA: {:X?}", cea);
+            // println!("SK: {:X?}", sk);
 
-            break;
+            // errors += 1;
+            panic!();
         }
 
-        max_test_string = test_string;
-        max_char_values = char_values_clone;
-        max_cea = cea;
+        // max_line = line.into();
+        // max_test_string = test_string;
+        // max_char_values = char_values_clone;
+        // max_cea = cea;
         max_sk = sk;
     }
+
+    let duration = start.elapsed();
+
+    let total_lines = second_test_data.lines().count();
+
+    println!("Passed CollationTest_SHIFTED");
+    println!("(except that {} lines were ignored)", ignored);
+    println!("Compared {} lines in {:?}", total_lines, duration);
 }
