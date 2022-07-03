@@ -1,9 +1,7 @@
 #![warn(clippy::pedantic)]
 
 use std::cmp::Ordering;
-use unicol_sandbox::{
-    compare_sort_keys, get_char_values, get_collation_element_array, get_sort_key,
-};
+use unicol_sandbox::{compare_sort_keys, str_to_sort_key};
 
 fn main() {
     let test_data =
@@ -30,9 +28,7 @@ fn main() {
             test_string.push(c);
         }
 
-        let char_values = get_char_values(&test_string);
-        let cea = get_collation_element_array(char_values, shifting);
-        let sk = get_sort_key(&cea, shifting);
+        let sk = str_to_sort_key(&test_string, shifting);
 
         let comparison = compare_sort_keys(&sk, &max_sk);
         if comparison == Ordering::Less {
@@ -74,9 +70,7 @@ fn main() {
             test_string.push(c);
         }
 
-        let char_values = get_char_values(&test_string);
-        let cea = get_collation_element_array(char_values, shifting);
-        let sk = get_sort_key(&cea, shifting);
+        let sk = str_to_sort_key(&test_string, shifting);
 
         let comparison = compare_sort_keys(&sk, &max_sk);
         if comparison == Ordering::Less {

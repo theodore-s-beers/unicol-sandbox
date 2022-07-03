@@ -73,13 +73,13 @@ pub fn compare_sort_keys(a: &[u16], b: &[u16]) -> Ordering {
     Ordering::Equal
 }
 
-fn str_to_sort_key(input: &str, shifting: bool) -> Vec<u16> {
+pub fn str_to_sort_key(input: &str, shifting: bool) -> Vec<u16> {
     let char_values = get_char_values(input);
     let collation_element_array = get_collation_element_array(char_values, shifting);
     get_sort_key(&collation_element_array, shifting)
 }
 
-pub fn get_char_values(input: &str) -> Vec<u32> {
+fn get_char_values(input: &str) -> Vec<u32> {
     UnicodeNormalization::nfd(input)
         .into_iter()
         .map(|c| c as u32)
@@ -87,7 +87,7 @@ pub fn get_char_values(input: &str) -> Vec<u32> {
 }
 
 // This function is where the "magic" happens (or the sausage is made?)
-pub fn get_collation_element_array(mut char_values: Vec<u32>, shifting: bool) -> Vec<Vec<u16>> {
+fn get_collation_element_array(mut char_values: Vec<u32>, shifting: bool) -> Vec<Vec<u16>> {
     let mut collation_element_array: Vec<Vec<u16>> = Vec::new();
 
     let mut left: usize = 0;
@@ -332,7 +332,7 @@ pub fn get_collation_element_array(mut char_values: Vec<u32>, shifting: bool) ->
 }
 
 // We flatten a slice of u16 vecs to one u16 vec, according to UCA rules
-pub fn get_sort_key(collation_element_array: &[Vec<u16>], shifting: bool) -> Vec<u16> {
+fn get_sort_key(collation_element_array: &[Vec<u16>], shifting: bool) -> Vec<u16> {
     let max_level = if shifting { 4 } else { 3 };
     let mut sort_key: Vec<u16> = Vec::new();
 
