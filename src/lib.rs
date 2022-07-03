@@ -109,26 +109,23 @@ fn get_collation_element_array(mut char_values: Vec<u32>, shifting: bool) -> Vec
 
             if let Some(value) = PARSED_BIN.get(subset) {
                 // This means we've found "the longest initial substring S at [this] point that has
-                // a match in the collation element table."
-                //
-                // We should next check for "non-starters" that follow this substring.
+                // a match in the collation element table." Next we check for "non-starters" that
+                // follow this substring.
                 //
                 // The idea is that there could be multiple non-starters in a row, not blocking one
                 // another, such that we could skip over one (or more) to make a longer substring
                 // that has a match in the table.
                 //
-                // The first example that we need to check is from the test string "0438 0306
-                // 0334." NFD normalization will reorder that to "0438 0334 0306." This causes a
-                // problem, since 0438 and 0306 can go together, but we'll miss it if we don't skip
-                // over 0334 in the normalized version. Both 0306 and 0334 are non-blocking (if
-                // I've understood correctly).
+                // One example comes from the test string "0438 0306 0334." NFD normalization will
+                // reorder that to "0438 0334 0306." This causes a problem, since 0438 and 0306 can
+                // go together, but we'll miss it if we don't look past 0334.
 
                 let mut skip_index = if (right + 2) < char_values.len() {
                     right + 2
                 } else if (right + 1) < char_values.len() {
                     right + 1
                 } else {
-                    // This should skip all the stuff below
+                    // This should skip the loop below
                     right
                 };
 
@@ -151,13 +148,14 @@ fn get_collation_element_array(mut char_values: Vec<u32>, shifting: bool) -> Vec
                     let left_ccc = get_canonical_combining_class(left_of_skip);
                     let skip_ccc = get_canonical_combining_class(skip_char);
 
-                    // If skip char is starting, or relationship between skip char and the one
-                    // preceding it is bad, decrement skip index and continue
+                    // If the skip char is a starter, or its CCC is less than or equal to that of
+                    // the char before it, decrement and continue
                     if skip_ccc == CanonicalCombiningClass::NotReordered || skip_ccc <= left_ccc {
                         skip_index -= 1;
                         continue;
                     }
 
+                    // Having made it this far, we can test a new subset, adding the skip char
                     let new_subset = [subset, [char_values[skip_index]].as_slice()].concat();
 
                     // If the new subset is found in the table...
@@ -165,23 +163,34 @@ fn get_collation_element_array(mut char_values: Vec<u32>, shifting: bool) -> Vec
                         // Then add these weights instead
                         for weights in new_value {
                             if shifting {
-                                // All weight vectors will have a fourth value added
+                                // Variable shifting means all weight vectors will have a fourth
+                                // value
+
+                                // If all weights were already 0, make the fourth 0
                                 if weights.primary == 0
                                     && weights.secondary == 0
                                     && weights.tertiary == 0
                                 {
                                     let weight_values = vec![0, 0, 0, 0];
                                     collation_element_array.push(weight_values);
+
+                                // If these weights are marked variable...
                                 } else if weights.variable {
                                     let weight_values = vec![0, 0, 0, weights.primary];
                                     collation_element_array.push(weight_values);
                                     last_variable = true;
+
+                                // If these are "ignorable" weights and follow something
+                                // variable...
                                 } else if last_variable
                                     && weights.primary == 0
                                     && weights.tertiary != 0
                                 {
                                     let weight_values = vec![0, 0, 0, 0];
                                     collation_element_array.push(weight_values);
+
+                                // Otherwise it can be assumed that we're dealing with something
+                                // non-ignorable, or ignorable but not following something variable
                                 } else {
                                     let weight_values = vec![
                                         weights.primary,
@@ -193,7 +202,7 @@ fn get_collation_element_array(mut char_values: Vec<u32>, shifting: bool) -> Vec
                                     last_variable = false;
                                 }
                             } else {
-                                // Do normal shit
+                                // If not shifting, we can just push weights and be done
                                 let weight_values =
                                     vec![weights.primary, weights.secondary, weights.tertiary];
                                 collation_element_array.push(weight_values);
@@ -211,34 +220,31 @@ fn get_collation_element_array(mut char_values: Vec<u32>, shifting: bool) -> Vec
                     skip_index -= 1;
                 }
 
-                // Not variable, primary weight non-zero: add fourth weight of 65_535; set
-                // last_variable to false
-                //
-                // Not following variable, primary weight zero, tertiary weight non-zero: add fourth
-                // weight of 65_535; set last_variable to false
-                //
-                // Variable: first three weights zeroed; fourth weight is former primary; set
-                // last_variable to true
-                //
-                // Following variable, primary weight zero, tertiary weight non-zero: all four
-                // weights zeroed; set last_variable to false
-                //
-                // All three weights already zero: add 0 fourth weight; set last_variable to false
+                // At this point, we're not looking for a discontiguous match. We just need to push
+                // the weights from the original subset we found
 
-                // Otherwise, add the weights of the original subset we found
                 for weights in value {
                     if shifting {
-                        // All weight vectors will have a fourth value added
+                        // Variable shifting means all weight vectors will have a fourth value
+
+                        // If all weights were already 0, make the fourth 0
                         if weights.primary == 0 && weights.secondary == 0 && weights.tertiary == 0 {
                             let weight_values = vec![0, 0, 0, 0];
                             collation_element_array.push(weight_values);
+
+                        // If these weights are marked variable...
                         } else if weights.variable {
                             let weight_values = vec![0, 0, 0, weights.primary];
                             collation_element_array.push(weight_values);
                             last_variable = true;
+
+                        // If these are "ignorable" weights and follow something variable...
                         } else if last_variable && weights.primary == 0 && weights.tertiary != 0 {
                             let weight_values = vec![0, 0, 0, 0];
                             collation_element_array.push(weight_values);
+
+                        // Otherwise it can be assumed that we're dealing with something non-
+                        // ignorable, or ignorable but not following something variable
                         } else {
                             let weight_values =
                                 vec![weights.primary, weights.secondary, weights.tertiary, 65_535];
@@ -246,7 +252,7 @@ fn get_collation_element_array(mut char_values: Vec<u32>, shifting: bool) -> Vec
                             last_variable = false;
                         }
                     } else {
-                        // Do normal shit
+                        // If not shifting, we can just push weights and be done
                         let weight_values =
                             vec![weights.primary, weights.secondary, weights.tertiary];
                         collation_element_array.push(weight_values);
@@ -262,44 +268,45 @@ fn get_collation_element_array(mut char_values: Vec<u32>, shifting: bool) -> Vec
             right -= 1;
         }
 
-        // At this point, we're looking for one value, and it isn't in the table
+        // At this point, we're looking for just one value, and it isn't in the table
         // Time for implicit weights...
 
         let problem_val = char_values[left];
+        // Again we need the unsafe method because of intentionally bad values in conformance tests
         let problem_char = unsafe { char::from_u32_unchecked(problem_val) };
 
         #[allow(clippy::manual_range_contains)]
         let mut aaaa = match problem_val {
-            x if x >= 13_312 && x <= 19_903 => (64_384 + (problem_val >> 15)), //   CJK2
-            x if x >= 19_968 && x <= 40_959 => (64_320 + (problem_val >> 15)), //   CJK1
-            x if x >= 63_744 && x <= 64_255 => (64_320 + (problem_val >> 15)), //   CJK1
-            x if x >= 94_208 && x <= 101_119 => 64_256,                        //   Tangut
-            x if x >= 101_120 && x <= 101_631 => 64_258,                       //   Khitan
-            x if x >= 101_632 && x <= 101_775 => 64_256,                       //   Tangut
-            x if x >= 110_960 && x <= 111_359 => 64_257,                       //   Nushu
-            x if x >= 131_072 && x <= 173_791 => (64_384 + (problem_val >> 15)), // CJK2
-            x if x >= 173_824 && x <= 191_471 => (64_384 + (problem_val >> 15)), // CJK2
-            x if x >= 196_608 && x <= 201_551 => (64_384 + (problem_val >> 15)), // CJK2
-            _ => (64_448 + (problem_val >> 15)),                               //   unass.
+            x if x >= 13_312 && x <= 19_903 => 64_384 + (problem_val >> 15), //     CJK2
+            x if x >= 19_968 && x <= 40_959 => 64_320 + (problem_val >> 15), //     CJK1
+            x if x >= 63_744 && x <= 64_255 => 64_320 + (problem_val >> 15), //     CJK1
+            x if x >= 94_208 && x <= 101_119 => 64_256,                      //     Tangut
+            x if x >= 101_120 && x <= 101_631 => 64_258,                     //     Khitan
+            x if x >= 101_632 && x <= 101_775 => 64_256,                     //     Tangut
+            x if x >= 110_960 && x <= 111_359 => 64_257,                     //     Nushu
+            x if x >= 131_072 && x <= 173_791 => 64_384 + (problem_val >> 15), //   CJK2
+            x if x >= 173_824 && x <= 191_471 => 64_384 + (problem_val >> 15), //   CJK2
+            x if x >= 196_608 && x <= 201_551 => 64_384 + (problem_val >> 15), //   CJK2
+            _ => 64_448 + (problem_val >> 15),                               //     unass.
         };
 
         #[allow(clippy::manual_range_contains)]
         let mut bbbb = match problem_val {
-            x if x >= 13_312 && x <= 19_903 => (problem_val & 32_767), //     CJK2
-            x if x >= 19_968 && x <= 40_959 => (problem_val & 32_767), //     CJK1
-            x if x >= 63_744 && x <= 64_255 => (problem_val & 32_767), //     CJK1
-            x if x >= 94_208 && x <= 101_119 => (problem_val - 94_208), //    Tangut
-            x if x >= 101_120 && x <= 101_631 => (problem_val - 101_120), //  Khitan
-            x if x >= 101_632 && x <= 101_775 => (problem_val - 94_208), //   Tangut
-            x if x >= 110_960 && x <= 111_359 => (problem_val - 110_960), //  Nushu
-            x if x >= 131_072 && x <= 173_791 => (problem_val & 32_767), //   CJK2
-            x if x >= 173_824 && x <= 191_471 => (problem_val & 32_767), //   CJK2
-            x if x >= 196_608 && x <= 201_551 => (problem_val & 32_767), //   CJK2
-            _ => (problem_val & 32_767),                               //     unass.
+            x if x >= 13_312 && x <= 19_903 => problem_val & 32_767, //      CJK2
+            x if x >= 19_968 && x <= 40_959 => problem_val & 32_767, //      CJK1
+            x if x >= 63_744 && x <= 64_255 => problem_val & 32_767, //      CJK1
+            x if x >= 94_208 && x <= 101_119 => problem_val - 94_208, //     Tangut
+            x if x >= 101_120 && x <= 101_631 => problem_val - 101_120, //   Khitan
+            x if x >= 101_632 && x <= 101_775 => problem_val - 94_208, //    Tangut
+            x if x >= 110_960 && x <= 111_359 => problem_val - 110_960, //   Nushu
+            x if x >= 131_072 && x <= 173_791 => problem_val & 32_767, //    CJK2
+            x if x >= 173_824 && x <= 191_471 => problem_val & 32_767, //    CJK2
+            x if x >= 196_608 && x <= 201_551 => problem_val & 32_767, //    CJK2
+            _ => problem_val & 32_767,                               //      unass.
         };
 
-        // Some of the above is incorrect. Need to check for individual unassigned characters
-        // Or I could fix the above match statements, maybe...
+        // The above ranges apparently include the occasional unassigned code point. I'm not sure
+        // how to fix that, other than by adding an extra check
         if !is_public_assigned(problem_char) {
             aaaa = 64_448 + (problem_val >> 15);
             bbbb = problem_val & 32_767;
@@ -310,6 +317,7 @@ fn get_collation_element_array(mut char_values: Vec<u32>, shifting: bool) -> Vec
 
         #[allow(clippy::cast_possible_truncation)]
         let first_weights = if shifting {
+            // Add an arbitrary fourth weight if shifting
             vec![aaaa as u16, 32, 2, 65_535]
         } else {
             vec![aaaa as u16, 32, 2]
@@ -318,6 +326,7 @@ fn get_collation_element_array(mut char_values: Vec<u32>, shifting: bool) -> Vec
 
         #[allow(clippy::cast_possible_truncation)]
         let second_weights = if shifting {
+            // Add an arbitrary fourth weight if shifting
             vec![bbbb as u16, 0, 0, 65_535]
         } else {
             vec![bbbb as u16, 0, 0]
@@ -331,7 +340,7 @@ fn get_collation_element_array(mut char_values: Vec<u32>, shifting: bool) -> Vec
     collation_element_array
 }
 
-// We flatten a slice of u16 vecs to one u16 vec, according to UCA rules
+// We flatten a slice of u16 vecs to one u16 vec, per UCA instructions
 fn get_sort_key(collation_element_array: &[Vec<u16>], shifting: bool) -> Vec<u16> {
     let max_level = if shifting { 4 } else { 3 };
     let mut sort_key: Vec<u16> = Vec::new();
