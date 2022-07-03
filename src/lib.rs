@@ -27,11 +27,36 @@ impl Weights {
     }
 }
 
+pub struct CollationOptions {
+    pub keys_source: KeysSource,
+    pub shifting: bool,
+}
+
+impl Default for CollationOptions {
+    fn default() -> Self {
+        Self {
+            keys_source: KeysSource::Cldr,
+            shifting: true,
+        }
+    }
+}
+
+pub enum KeysSource {
+    Cldr,
+    Ducet,
+}
+
 #[allow(unused)]
 static PARSED: Lazy<HashMap<Vec<u32>, Vec<Weights>>> = Lazy::new(parse_keys);
 
-pub static PARSED_BIN: Lazy<HashMap<Vec<u32>, Vec<Weights>>> = Lazy::new(|| {
+static ALLKEYS: Lazy<HashMap<Vec<u32>, Vec<Weights>>> = Lazy::new(|| {
     let data = std::fs::read("test-data/allkeys_bincode").unwrap();
+    let decoded: HashMap<Vec<u32>, Vec<Weights>> = bincode::deserialize(&data[..]).unwrap();
+    decoded
+});
+
+static ALLKEYS_CLDR: Lazy<HashMap<Vec<u32>, Vec<Weights>>> = Lazy::new(|| {
+    let data = std::fs::read("test-data/allkeys_cldr_bincode").unwrap();
     let decoded: HashMap<Vec<u32>, Vec<Weights>> = bincode::deserialize(&data[..]).unwrap();
     decoded
 });
@@ -43,9 +68,9 @@ macro_rules! regex {
     }};
 }
 
-pub fn collate(str_1: &str, str_2: &str, shifting: bool) -> Ordering {
-    let sort_key_1 = str_to_sort_key(str_1, shifting);
-    let sort_key_2 = str_to_sort_key(str_2, shifting);
+pub fn collate(str_1: &str, str_2: &str, options: &CollationOptions) -> Ordering {
+    let sort_key_1 = str_to_sort_key(str_1, options);
+    let sort_key_2 = str_to_sort_key(str_2, options);
 
     let comparison = compare_sort_keys(&sort_key_1, &sort_key_2);
 
@@ -73,13 +98,13 @@ pub fn compare_sort_keys(a: &[u16], b: &[u16]) -> Ordering {
     Ordering::Equal
 }
 
-pub fn str_to_sort_key(input: &str, shifting: bool) -> Vec<u16> {
+pub fn str_to_sort_key(input: &str, options: &CollationOptions) -> Vec<u16> {
     let char_values = get_char_values(input);
-    let collation_element_array = get_collation_element_array(char_values, shifting);
-    get_sort_key(&collation_element_array, shifting)
+    let collation_element_array = get_collation_element_array(char_values, options);
+    get_sort_key(&collation_element_array, options.shifting)
 }
 
-fn get_char_values(input: &str) -> Vec<u32> {
+pub fn get_char_values(input: &str) -> Vec<u32> {
     UnicodeNormalization::nfd(input)
         .into_iter()
         .map(|c| c as u32)
@@ -87,7 +112,17 @@ fn get_char_values(input: &str) -> Vec<u32> {
 }
 
 // This function is where the "magic" happens (or the sausage is made?)
-fn get_collation_element_array(mut char_values: Vec<u32>, shifting: bool) -> Vec<Vec<u16>> {
+pub fn get_collation_element_array(
+    mut char_values: Vec<u32>,
+    options: &CollationOptions,
+) -> Vec<Vec<u16>> {
+    let keys = match options.keys_source {
+        KeysSource::Cldr => &ALLKEYS_CLDR,
+        KeysSource::Ducet => &ALLKEYS,
+    };
+
+    let shifting = options.shifting;
+
     let mut collation_element_array: Vec<Vec<u16>> = Vec::new();
 
     let mut left: usize = 0;
@@ -107,7 +142,7 @@ fn get_collation_element_array(mut char_values: Vec<u32>, shifting: bool) -> Vec
         while right > left {
             let subset = &char_values[left..right];
 
-            if let Some(value) = PARSED_BIN.get(subset) {
+            if let Some(value) = keys.get(subset) {
                 // This means we've found "the longest initial substring S at [this] point that has
                 // a match in the collation element table." Next we check for "non-starters" that
                 // follow this substring.
@@ -159,7 +194,7 @@ fn get_collation_element_array(mut char_values: Vec<u32>, shifting: bool) -> Vec
                     let new_subset = [subset, [char_values[skip_index]].as_slice()].concat();
 
                     // If the new subset is found in the table...
-                    if let Some(new_value) = PARSED_BIN.get(&new_subset) {
+                    if let Some(new_value) = keys.get(&new_subset) {
                         // Then add these weights instead
                         for weights in new_value {
                             if shifting {
@@ -362,7 +397,7 @@ fn get_sort_key(collation_element_array: &[Vec<u16>], shifting: bool) -> Vec<u16
 
 // This is just to generate bincode; not usually run
 fn parse_keys() -> HashMap<Vec<u32>, Vec<Weights>> {
-    let keys = std::fs::read_to_string("test-data/allkeys_CLDR.txt").unwrap();
+    let keys = std::fs::read_to_string("test-data/allkeys.txt").unwrap();
     let mut map = HashMap::new();
 
     for line in keys.lines() {
@@ -422,7 +457,12 @@ mod tests {
             "de-Luge", "death",
         ];
 
-        scrambled.sort_by(|a, b| collate(a, b, true));
+        let options = CollationOptions {
+            keys_source: KeysSource::Ducet,
+            shifting: true,
+        };
+
+        scrambled.sort_by(|a, b| collate(a, b, &options));
 
         let sorted = [
             "death", "de luge", "de-luge", "de-luge", "deluge", "de Luge", "de-Luge", "de-Luge",
@@ -454,7 +494,12 @@ mod tests {
             "filé-110",
         ];
 
-        scrambled.sort_by(|a, b| collate(a, b, true));
+        let options = CollationOptions {
+            keys_source: KeysSource::Ducet,
+            shifting: true,
+        };
+
+        scrambled.sort_by(|a, b| collate(a, b, &options));
 
         let sorted = [
             "ab©",
