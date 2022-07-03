@@ -17,8 +17,6 @@ fn main() {
         shifting: false,
     };
 
-    let start = std::time::Instant::now();
-
     let mut max_sk: Vec<u16> = Vec::new();
 
     for line in test_data.lines() {
@@ -47,13 +45,7 @@ fn main() {
         max_sk = sk;
     }
 
-    let duration = start.elapsed();
-
-    let total_lines = test_data.lines().count();
-
     println!("Passed CollationTest_NON_IGNORABLE");
-    println!("Compared {} lines in {:?}", total_lines, duration);
-    println!();
 
     //
     // DUCET, SHIFTED
@@ -65,8 +57,6 @@ fn main() {
         keys_source: KeysSource::Ducet,
         shifting: true,
     };
-
-    let start = std::time::Instant::now();
 
     let mut max_sk = Vec::new();
 
@@ -96,13 +86,7 @@ fn main() {
         max_sk = sk;
     }
 
-    let duration = start.elapsed();
-
-    let total_lines = test_data.lines().count();
-
     println!("Passed CollationTest_SHIFTED");
-    println!("Compared {} lines in {:?}", total_lines, duration);
-    println!();
 
     //
     // CLDR, NON-IGNORABLE
@@ -116,8 +100,6 @@ fn main() {
         shifting: false,
     };
 
-    let start = std::time::Instant::now();
-
     let mut max_sk = Vec::new();
 
     for line in test_data.lines() {
@@ -146,13 +128,7 @@ fn main() {
         max_sk = sk;
     }
 
-    let duration = start.elapsed();
-
-    let total_lines = test_data.lines().count();
-
     println!("Passed CollationTest_CLDR_NON_IGNORABLE");
-    println!("Compared {} lines in {:?}", total_lines, duration);
-    println!();
 
     //
     // CLDR, SHIFTED
@@ -166,8 +142,6 @@ fn main() {
         shifting: true,
     };
 
-    let start = std::time::Instant::now();
-
     let mut max_sk = Vec::new();
 
     for line in test_data.lines() {
@@ -196,10 +170,5 @@ fn main() {
         max_sk = sk;
     }
 
-    let duration = start.elapsed();
-
-    let total_lines = test_data.lines().count();
-
     println!("Passed CollationTest_CLDR_SHIFTED");
-    println!("Compared {} lines in {:?}", total_lines, duration);
 }
