@@ -1,10 +1,7 @@
 #![warn(clippy::pedantic)]
 
 use std::cmp::Ordering;
-use unicol_sandbox::{
-    compare_sort_keys, get_char_values, get_collation_element_array, str_to_sort_key,
-    CollationOptions, KeysSource,
-};
+use unicol_sandbox::{compare_sort_keys, str_to_sort_key, CollationOptions, KeysSource};
 
 fn main() {
     //
@@ -19,9 +16,9 @@ fn main() {
         shifting: false,
     };
 
-    let start = std::time::Instant::now();
-
     let mut max_sk: Vec<u16> = Vec::new();
+
+    let start = std::time::Instant::now();
 
     for line in test_data.lines() {
         if line.is_empty() || line.starts_with('#') {
@@ -68,9 +65,9 @@ fn main() {
         shifting: true,
     };
 
-    let start = std::time::Instant::now();
-
     let mut max_sk = Vec::new();
+
+    let start = std::time::Instant::now();
 
     for line in test_data.lines() {
         if line.is_empty() || line.starts_with('#') {
@@ -110,9 +107,6 @@ fn main() {
     // CLDR, NON-IGNORABLE
     //
 
-    println!("Now working on CollationTest_CLDR_NON_IGNORABLE...");
-    println!();
-
     let test_data =
         std::fs::read_to_string("test-data/CollationTest_CLDR_NON_IGNORABLE_SHORT.txt").unwrap();
 
@@ -123,7 +117,9 @@ fn main() {
 
     let mut max_sk = Vec::new();
 
-    for (i, line) in test_data.lines().enumerate() {
+    let start = std::time::Instant::now();
+
+    for line in test_data.lines() {
         if line.is_empty() || line.starts_with('#') {
             continue;
         }
@@ -139,29 +135,20 @@ fn main() {
             test_string.push(c);
         }
 
-        let char_values = get_char_values(&test_string);
-        let char_values_clone = char_values.clone();
-        let cea = get_collation_element_array(char_values, &options);
         let sk = str_to_sort_key(&test_string, &options);
 
         let comparison = compare_sort_keys(&sk, &max_sk);
         if comparison == Ordering::Less {
-            println!("Made it to this line (no. {}) before choking:", i);
-            println!("{}", line);
-            println!("NFD: {:04X?}", char_values_clone);
-            println!("CEA: {:?}", cea);
-            println!("SK: {:?}", sk);
-            println!("vs. {:?}", max_sk);
-
-            // The problem is again with discontiguous matches. We can find one match separated by
-            // two values, or one match separated by one value (checking in that order). This is
-            // enough to pass both UCA conformance tests. But the CLDR test wants us to find a set
-            // of two matches separated by one value. (Hopefully that's where the madness ends...)
-            // This will require a different approach.
-
-            break;
+            panic!();
         }
 
         max_sk = sk;
     }
+
+    let duration = start.elapsed();
+
+    let total_lines = test_data.lines().count();
+
+    println!("Passed CollationTest_CLDR_NON_IGNORABLE");
+    println!("Compared {} lines in {:?}", total_lines, duration);
 }

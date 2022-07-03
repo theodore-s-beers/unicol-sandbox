@@ -4,7 +4,9 @@ use std::collections::HashMap;
 use once_cell::sync::{Lazy, OnceCell};
 use regex::Regex;
 use serde::{Deserialize, Serialize};
-use unicode_canonical_combining_class::{get_canonical_combining_class, CanonicalCombiningClass};
+use unicode_canonical_combining_class::{
+    get_canonical_combining_class as get_ccc, CanonicalCombiningClass,
+};
 use unicode_normalization::char::is_public_assigned;
 use unicode_normalization::UnicodeNormalization;
 
@@ -41,6 +43,7 @@ impl Default for CollationOptions {
     }
 }
 
+#[derive(PartialEq, Eq)]
 pub enum KeysSource {
     Cldr,
     Ducet,
@@ -121,6 +124,7 @@ pub fn get_collation_element_array(
         KeysSource::Ducet => &ALLKEYS,
     };
 
+    let cldr = options.keys_source == KeysSource::Cldr;
     let shifting = options.shifting;
 
     let mut collation_element_array: Vec<Vec<u16>> = Vec::new();
@@ -155,7 +159,7 @@ pub fn get_collation_element_array(
                 // reorder that to "0438 0334 0306." This causes a problem, since 0438 and 0306 can
                 // go together, but we'll miss it if we don't look past 0334.
 
-                let mut skip_index = if (right + 2) < char_values.len() {
+                let mut max_right = if (right + 2) < char_values.len() {
                     right + 2
                 } else if (right + 1) < char_values.len() {
                     right + 1
@@ -164,34 +168,31 @@ pub fn get_collation_element_array(
                     right
                 };
 
-                'inner: while skip_index > right {
-                    // We verify that all chars in the range right..skip_index are non-starters
+                let mut try_two = max_right == right + 2 && cldr;
+
+                'inner: while max_right > right {
+                    // We verify that all chars in the range right..=max_right are non-starters
                     // If there are any starters in our range of interest, decrement and continue
-                    let interest_cohort = &char_values[right..skip_index];
+                    // The CCCs also have to be increasing, apparently...
+
+                    let interest_cohort = &char_values[right..=max_right];
+                    let mut max_ccc = CanonicalCombiningClass::NotReordered;
+
                     for elem in interest_cohort {
-                        let c = char::from_u32(*elem).unwrap();
-                        if get_canonical_combining_class(c) == CanonicalCombiningClass::NotReordered
-                        {
-                            skip_index -= 1;
+                        let ccc = get_ccc(char::from_u32(*elem).unwrap());
+                        if ccc == CanonicalCombiningClass::NotReordered || ccc <= max_ccc {
+                            max_right -= 1;
                             continue 'inner;
                         }
+                        max_ccc = ccc;
                     }
 
-                    let left_of_skip = char::from_u32(char_values[skip_index - 1]).unwrap();
-                    let skip_char = char::from_u32(char_values[skip_index]).unwrap();
-
-                    let left_ccc = get_canonical_combining_class(left_of_skip);
-                    let skip_ccc = get_canonical_combining_class(skip_char);
-
-                    // If the skip char is a starter, or its CCC is less than or equal to that of
-                    // the char before it, decrement and continue
-                    if skip_ccc == CanonicalCombiningClass::NotReordered || skip_ccc <= left_ccc {
-                        skip_index -= 1;
-                        continue;
-                    }
-
-                    // Having made it this far, we can test a new subset, adding the skip char
-                    let new_subset = [subset, [char_values[skip_index]].as_slice()].concat();
+                    // Having made it this far, we can test a new subset, adding the later char(s)
+                    let new_subset = if try_two {
+                        [subset, &char_values[max_right - 1..=max_right]].concat()
+                    } else {
+                        [subset, [char_values[max_right]].as_slice()].concat()
+                    };
 
                     // If the new subset is found in the table...
                     if let Some(new_value) = keys.get(&new_subset) {
@@ -244,15 +245,23 @@ pub fn get_collation_element_array(
                             }
                         }
 
-                        // Remove the skip char
-                        char_values.remove(skip_index);
+                        // Remove the pulled char(s) (in this order!)
+                        char_values.remove(max_right);
+                        if try_two {
+                            char_values.remove(max_right - 1);
+                        }
 
                         // Increment and continue outer loop
                         left += right - left;
                         continue 'outer;
                     }
 
-                    skip_index -= 1;
+                    // If we tried for two, don't decrement max_right yet
+                    if try_two {
+                        try_two = false;
+                    } else {
+                        max_right -= 1
+                    }
                 }
 
                 // At this point, we're not looking for a discontiguous match. We just need to push
