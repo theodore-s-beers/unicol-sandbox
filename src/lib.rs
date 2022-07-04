@@ -181,6 +181,8 @@ pub fn get_collation_element_array(
                     for elem in interest_cohort {
                         let ccc = get_ccc(char::from_u32(*elem).unwrap());
                         if ccc == CanonicalCombiningClass::NotReordered || ccc <= max_ccc {
+                            // Can also forget about try_two in this case
+                            try_two = false;
                             max_right -= 1;
                             continue 'inner;
                         }
