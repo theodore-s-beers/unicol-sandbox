@@ -18,7 +18,7 @@ fn conformance(path: &str, options: CollationOptions) {
         for s in hex_values {
             let val = u32::from_str_radix(s, 16).unwrap();
             // This is BS, but we have to use an unsafe method because the tests deliberately
-            // introduce invalid character values.
+            // introduce invalid character values
             let c = unsafe { std::char::from_u32_unchecked(val) };
             test_string.push(c);
         }
