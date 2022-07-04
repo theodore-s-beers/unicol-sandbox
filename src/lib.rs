@@ -53,13 +53,13 @@ pub enum KeysSource {
 static PARSED: Lazy<HashMap<Vec<u32>, Vec<Weights>>> = Lazy::new(parse_keys);
 
 static ALLKEYS: Lazy<HashMap<Vec<u32>, Vec<Weights>>> = Lazy::new(|| {
-    let data = std::fs::read("test-data/allkeys_bincode").unwrap();
+    let data = include_bytes!("allkeys_bincode");
     let decoded: HashMap<Vec<u32>, Vec<Weights>> = bincode::deserialize(&data[..]).unwrap();
     decoded
 });
 
 static ALLKEYS_CLDR: Lazy<HashMap<Vec<u32>, Vec<Weights>>> = Lazy::new(|| {
-    let data = std::fs::read("test-data/allkeys_cldr_bincode").unwrap();
+    let data = include_bytes!("allkeys_cldr_bincode");
     let decoded: HashMap<Vec<u32>, Vec<Weights>> = bincode::deserialize(&data[..]).unwrap();
     decoded
 });
