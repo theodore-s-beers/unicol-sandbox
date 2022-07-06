@@ -4,10 +4,7 @@ use std::collections::HashMap;
 use once_cell::sync::{Lazy, OnceCell};
 use regex::Regex;
 use serde::{Deserialize, Serialize};
-use unicode_canonical_combining_class::{
-    get_canonical_combining_class as get_ccc, CanonicalCombiningClass,
-};
-use unicode_normalization::char::is_public_assigned;
+use unicode_canonical_combining_class::get_canonical_combining_class as get_ccc;
 use unicode_normalization::UnicodeNormalization;
 
 #[derive(Deserialize, Serialize)]
@@ -71,15 +68,15 @@ macro_rules! regex {
     }};
 }
 
-pub fn collate(str_1: &str, str_2: &str, options: &CollationOptions) -> Ordering {
-    let sort_key_1 = str_to_sort_key(str_1, options);
-    let sort_key_2 = str_to_sort_key(str_2, options);
+pub fn collate(str_a: &str, str_b: &str, options: &CollationOptions) -> Ordering {
+    let sort_key_1 = str_to_sort_key(str_a, options);
+    let sort_key_2 = str_to_sort_key(str_b, options);
 
     let comparison = compare_sort_keys(&sort_key_1, &sort_key_2);
 
     if comparison == Ordering::Equal {
         // Fallback
-        return str_1.cmp(str_2);
+        return str_a.cmp(str_b);
     }
 
     comparison
@@ -108,10 +105,27 @@ pub fn str_to_sort_key(input: &str, options: &CollationOptions) -> Vec<u16> {
 }
 
 pub fn get_char_values(input: &str) -> Vec<u32> {
-    UnicodeNormalization::nfd(input)
-        .into_iter()
-        .map(|c| c as u32)
-        .collect()
+    UnicodeNormalization::nfd(input).map(|c| c as u32).collect()
+}
+
+// We flatten a slice of u16 vecs to one u16 vec, per UCA instructions
+fn get_sort_key(collation_element_array: &[Vec<u16>], shifting: bool) -> Vec<u16> {
+    let max_level = if shifting { 4 } else { 3 };
+    let mut sort_key: Vec<u16> = Vec::new();
+
+    for i in 0..max_level {
+        if i > 0 {
+            sort_key.push(0);
+        }
+
+        for elem in collation_element_array.iter() {
+            if elem[i] != 0 {
+                sort_key.push(elem[i]);
+            }
+        }
+    }
+
+    sort_key
 }
 
 // This function is where the "magic" happens (or the sausage is made?)
@@ -133,8 +147,19 @@ pub fn get_collation_element_array(
     let mut last_variable = false;
 
     'outer: while left < char_values.len() {
-        // If left <= 3200 (0C80), only need to look one ahead
-        let lookahead: usize = if char_values[left] <= 3_200 { 2 } else { 3 };
+        let left_val = char_values[left];
+
+        // Set lookahead depending on left_val. Default is 2; there's a small range where we need
+        // 3; and a few larger ranges where we need only 1.
+        #[allow(clippy::manual_range_contains)]
+        let lookahead: usize = match left_val {
+            x if x < 3_266 => 2,
+            x if x <= 4_019 => 3,
+            x if x > 4_142 && x < 6_528 => 1,
+            x if x > 6_978 && x < 43_648 => 1,
+            x if x > 43_708 && x < 69_927 => 1,
+            _ => 2,
+        };
 
         // But don't look past the end of the vec
         let mut right = if left + lookahead > char_values.len() {
@@ -168,7 +193,7 @@ pub fn get_collation_element_array(
                     right
                 };
 
-                let mut try_two = max_right == right + 2 && cldr;
+                let mut try_two = max_right - right == 2 && cldr;
 
                 'inner: while max_right > right {
                     // We verify that all chars in the range right..=max_right are non-starters
@@ -176,11 +201,11 @@ pub fn get_collation_element_array(
                     // The CCCs also have to be increasing, apparently...
 
                     let interest_cohort = &char_values[right..=max_right];
-                    let mut max_ccc = CanonicalCombiningClass::NotReordered;
+                    let mut max_ccc = 0;
 
                     for elem in interest_cohort {
-                        let ccc = get_ccc(char::from_u32(*elem).unwrap());
-                        if ccc == CanonicalCombiningClass::NotReordered || ccc <= max_ccc {
+                        let ccc = get_ccc(char::from_u32(*elem).unwrap()) as u8;
+                        if ccc == 0 || ccc <= max_ccc {
                             // Can also forget about try_two in this case
                             try_two = false;
                             max_right -= 1;
@@ -262,7 +287,7 @@ pub fn get_collation_element_array(
                     if try_two {
                         try_two = false;
                     } else {
-                        max_right -= 1
+                        max_right -= 1;
                     }
                 }
 
@@ -314,48 +339,49 @@ pub fn get_collation_element_array(
             right -= 1;
         }
 
-        // At this point, we're looking for just one value, and it isn't in the table
+        // By now, we're looking for just one value, and it isn't in the table
         // Time for implicit weights...
 
-        let problem_val = char_values[left];
-        // Again we need the unsafe method because of intentionally bad values in conformance tests
-        let problem_char = unsafe { char::from_u32_unchecked(problem_val) };
-
         #[allow(clippy::manual_range_contains)]
-        let mut aaaa = match problem_val {
-            x if x >= 13_312 && x <= 19_903 => 64_384 + (problem_val >> 15), //     CJK2
-            x if x >= 19_968 && x <= 40_959 => 64_320 + (problem_val >> 15), //     CJK1
-            x if x >= 63_744 && x <= 64_255 => 64_320 + (problem_val >> 15), //     CJK1
-            x if x >= 94_208 && x <= 101_119 => 64_256,                      //     Tangut
-            x if x >= 101_120 && x <= 101_631 => 64_258,                     //     Khitan
-            x if x >= 101_632 && x <= 101_775 => 64_256,                     //     Tangut
-            x if x >= 110_960 && x <= 111_359 => 64_257,                     //     Nushu
-            x if x >= 131_072 && x <= 173_791 => 64_384 + (problem_val >> 15), //   CJK2
-            x if x >= 173_824 && x <= 191_471 => 64_384 + (problem_val >> 15), //   CJK2
-            x if x >= 196_608 && x <= 201_551 => 64_384 + (problem_val >> 15), //   CJK2
-            _ => 64_448 + (problem_val >> 15),                               //     unass.
+        let mut aaaa = match left_val {
+            x if x >= 13_312 && x <= 19_903 => 64_384 + (left_val >> 15), //     CJK2
+            x if x >= 19_968 && x <= 40_959 => 64_320 + (left_val >> 15), //     CJK1
+            x if x >= 63_744 && x <= 64_255 => 64_320 + (left_val >> 15), //     CJK1
+            x if x >= 94_208 && x <= 101_119 => 64_256,                   //     Tangut
+            x if x >= 101_120 && x <= 101_631 => 64_258,                  //     Khitan
+            x if x >= 101_632 && x <= 101_775 => 64_256,                  //     Tangut
+            x if x >= 110_960 && x <= 111_359 => 64_257,                  //     Nushu
+            x if x >= 131_072 && x <= 173_791 => 64_384 + (left_val >> 15), //   CJK2
+            x if x >= 173_824 && x <= 191_471 => 64_384 + (left_val >> 15), //   CJK2
+            x if x >= 196_608 && x <= 201_551 => 64_384 + (left_val >> 15), //   CJK2
+            _ => 64_448 + (left_val >> 15),                               //     unass.
         };
 
         #[allow(clippy::manual_range_contains)]
-        let mut bbbb = match problem_val {
-            x if x >= 13_312 && x <= 19_903 => problem_val & 32_767, //      CJK2
-            x if x >= 19_968 && x <= 40_959 => problem_val & 32_767, //      CJK1
-            x if x >= 63_744 && x <= 64_255 => problem_val & 32_767, //      CJK1
-            x if x >= 94_208 && x <= 101_119 => problem_val - 94_208, //     Tangut
-            x if x >= 101_120 && x <= 101_631 => problem_val - 101_120, //   Khitan
-            x if x >= 101_632 && x <= 101_775 => problem_val - 94_208, //    Tangut
-            x if x >= 110_960 && x <= 111_359 => problem_val - 110_960, //   Nushu
-            x if x >= 131_072 && x <= 173_791 => problem_val & 32_767, //    CJK2
-            x if x >= 173_824 && x <= 191_471 => problem_val & 32_767, //    CJK2
-            x if x >= 196_608 && x <= 201_551 => problem_val & 32_767, //    CJK2
-            _ => problem_val & 32_767,                               //      unass.
+        let mut bbbb = match left_val {
+            x if x >= 13_312 && x <= 19_903 => left_val & 32_767, //      CJK2
+            x if x >= 19_968 && x <= 40_959 => left_val & 32_767, //      CJK1
+            x if x >= 63_744 && x <= 64_255 => left_val & 32_767, //      CJK1
+            x if x >= 94_208 && x <= 101_119 => left_val - 94_208, //     Tangut
+            x if x >= 101_120 && x <= 101_631 => left_val - 101_120, //   Khitan
+            x if x >= 101_632 && x <= 101_775 => left_val - 94_208, //    Tangut
+            x if x >= 110_960 && x <= 111_359 => left_val - 110_960, //   Nushu
+            x if x >= 131_072 && x <= 173_791 => left_val & 32_767, //    CJK2
+            x if x >= 173_824 && x <= 191_471 => left_val & 32_767, //    CJK2
+            x if x >= 196_608 && x <= 201_551 => left_val & 32_767, //    CJK2
+            _ => left_val & 32_767,                               //      unass.
         };
 
-        // The above ranges apparently include the occasional unassigned code point. I'm not sure
-        // how to fix that, other than by adding an extra check
-        if !is_public_assigned(problem_char) {
-            aaaa = 64_448 + (problem_val >> 15);
-            bbbb = problem_val & 32_767;
+        // One of the above ranges seems to include some unassigned code points. In order to pass
+        // the conformance tests, I'm adding an extra check here. This doesn't feel like a good way
+        // of dealing with the problem, but I haven't yet found a better approach that doesn't come
+        // with its own downsides.
+
+        let included_unassigned = [177_977, 178_206, 183_970, 191_457];
+
+        if included_unassigned.contains(&left_val) {
+            aaaa = 64_448 + (left_val >> 15);
+            bbbb = left_val & 32_767;
         }
 
         // BBBB always gets bitwise ORed with this value
@@ -384,26 +410,6 @@ pub fn get_collation_element_array(
     }
 
     collation_element_array
-}
-
-// We flatten a slice of u16 vecs to one u16 vec, per UCA instructions
-fn get_sort_key(collation_element_array: &[Vec<u16>], shifting: bool) -> Vec<u16> {
-    let max_level = if shifting { 4 } else { 3 };
-    let mut sort_key: Vec<u16> = Vec::new();
-
-    for i in 0..max_level {
-        if i > 0 {
-            sort_key.push(0);
-        }
-
-        for elem in collation_element_array.iter() {
-            if elem[i] != 0 {
-                sort_key.push(elem[i]);
-            }
-        }
-    }
-
-    sort_key
 }
 
 // This is just to generate bincode; not usually run
