@@ -61,6 +61,12 @@ static ALLKEYS_CLDR: Lazy<HashMap<Vec<u32>, Vec<Weights>>> = Lazy::new(|| {
     decoded
 });
 
+const NEED_THREE: [u32; 12] = [
+    3_266, 3_270, 3_285, 3_530, 3_535, 3_545, 3_953, 3_953, 3_968, 3_968, 4_018, 4_019,
+];
+
+const INCLUDED_UNASSIGNED: [u32; 4] = [177_977, 178_206, 183_970, 191_457];
+
 macro_rules! regex {
     ($re:literal $(,)?) => {{
         static RE: OnceCell<Regex> = OnceCell::new();
@@ -149,12 +155,10 @@ pub fn get_collation_element_array(
     'outer: while left < char_values.len() {
         let left_val = char_values[left];
 
-        // Set lookahead depending on left_val. Default is 2; there's a small range where we need
-        // 3; and a few larger ranges where we need only 1.
-        #[allow(clippy::manual_range_contains)]
+        // Set lookahead depending on left_val. Default is 2; there is a handful of cases where we
+        // need 3; and there are a few large ranges where we need only 1.
         let lookahead: usize = match left_val {
-            x if x < 3_266 => 2,
-            x if x <= 4_019 => 3,
+            x if NEED_THREE.contains(&x) => 3,
             x if x > 4_142 && x < 6_528 => 1,
             x if x > 6_978 && x < 43_648 => 1,
             x if x > 43_708 && x < 69_927 => 1,
@@ -377,9 +381,7 @@ pub fn get_collation_element_array(
         // of dealing with the problem, but I haven't yet found a better approach that doesn't come
         // with its own downsides.
 
-        let included_unassigned = [177_977, 178_206, 183_970, 191_457];
-
-        if included_unassigned.contains(&left_val) {
+        if INCLUDED_UNASSIGNED.contains(&left_val) {
             aaaa = 64_448 + (left_val >> 15);
             bbbb = left_val & 32_767;
         }
