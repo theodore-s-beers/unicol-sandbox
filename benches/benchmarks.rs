@@ -1,6 +1,6 @@
 use criterion::{criterion_group, criterion_main, Criterion};
 use std::cmp::Ordering;
-use unicol_sandbox::{compare_sort_keys, str_to_sort_key, CollationOptions, KeysSource};
+use unicol_sandbox::{compare_sort_keys, get_nfd, nfd_to_sk, CollationOptions, KeysSource};
 
 fn conformance(path: &str, options: CollationOptions) {
     let test_data = std::fs::read_to_string(path).unwrap();
@@ -23,7 +23,8 @@ fn conformance(path: &str, options: CollationOptions) {
             test_string.push(c);
         }
 
-        let sk = str_to_sort_key(&test_string, &options);
+        let nfd = get_nfd(&test_string);
+        let sk = nfd_to_sk(nfd, &options);
 
         let comparison = compare_sort_keys(&sk, &max_sk);
         if comparison == Ordering::Less {

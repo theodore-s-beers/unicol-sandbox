@@ -1,7 +1,7 @@
 #![warn(clippy::pedantic)]
 
 use std::cmp::Ordering;
-use unicol_sandbox::{compare_sort_keys, str_to_sort_key, CollationOptions, KeysSource};
+use unicol_sandbox::{compare_sort_keys, get_nfd, nfd_to_sk, CollationOptions, KeysSource};
 
 fn main() {
     //
@@ -86,7 +86,8 @@ fn conformance(path: &str, options: &CollationOptions) {
             test_string.push(c);
         }
 
-        let sk = str_to_sort_key(&test_string, options);
+        let nfd = get_nfd(&test_string);
+        let sk = nfd_to_sk(nfd, options);
 
         let comparison = compare_sort_keys(&sk, &max_sk);
         if comparison == Ordering::Less {
