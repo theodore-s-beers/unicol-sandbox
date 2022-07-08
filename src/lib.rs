@@ -192,13 +192,13 @@ fn get_sort_key(collation_element_array: &[Vec<u16>], shifting: bool) -> Vec<u16
 }
 
 fn get_collation_element_array(mut char_vals: Vec<u32>, opt: &CollationOptions) -> Vec<Vec<u16>> {
+    let mut cea: Vec<Vec<u16>> = Vec::new();
+
     let cldr = opt.keys_source == KeysSource::Cldr;
     let shifting = opt.shifting;
 
     let singles = if cldr { &S_KEYS_CLDR } else { &S_KEYS };
     let multis = if cldr { &M_KEYS_CLDR } else { &M_KEYS };
-
-    let mut cea: Vec<Vec<u16>> = Vec::new();
 
     let mut left: usize = 0;
     let mut last_variable = false;
@@ -214,9 +214,13 @@ fn get_collation_element_array(mut char_vals: Vec<u32>, opt: &CollationOptions) 
             _ => 1,
         };
 
-        // If lookahead is 1, or this is the last item in the vec, take an easy path
-        if lookahead == 1 || char_vals.len() - left == 1 {
+        let check_multi = lookahead > 1 && char_vals.len() - left > 1;
+
+        // If lookahead is 1, or if this is the last item in the vec, take an easy path
+        if !check_multi {
+            // Did we find it? Sure hope so
             if let Some(row) = singles.get(&left_val) {
+                // Push weights to collation element array
                 for weights in row {
                     if shifting {
                         let weight_values = get_weights_shifting(weights, last_variable);
@@ -227,7 +231,6 @@ fn get_collation_element_array(mut char_vals: Vec<u32>, opt: &CollationOptions) 
                             last_variable = false;
                         }
                     } else {
-                        // If not shifting, we can just push weights and be done
                         let weight_values =
                             vec![weights.primary, weights.secondary, weights.tertiary];
                         cea.push(weight_values);
@@ -240,19 +243,20 @@ fn get_collation_element_array(mut char_vals: Vec<u32>, opt: &CollationOptions) 
             }
         }
 
-        // Next consider multis
+        // Next consider multis, if applicable
+        // If we just tried to find a single, and didn't find it, we should skip all the way down
+        // to the implicit weights section
 
-        // Don't look past end of the vec
+        // But don't look past end of the vec
         let mut right = if left + lookahead > char_vals.len() {
             char_vals.len()
         } else {
             left + lookahead
         };
 
-        'middle: while right > left {
-            // If right - left == 1, attempts to find a slice have failed
-            // So look for one code point, in the singles map
-
+        'middle: while check_multi && right > left {
+            // If right - left == 1 (which cannot have been the case in the first iteration),
+            // attempts to find a slice have failed. So look for one code point, in the singles map
             if right - left == 1 {
                 // If we found it, we do still need to check for discontiguous matches
                 if let Some(value) = singles.get(&left_val) {
@@ -262,7 +266,7 @@ fn get_collation_element_array(mut char_vals: Vec<u32>, opt: &CollationOptions) 
                     } else if right + 1 < char_vals.len() {
                         right + 1
                     } else {
-                        // This should skip the loop below
+                        // This should skip the loop below. There will be no discontiguous match
                         right
                     };
 
@@ -327,12 +331,13 @@ fn get_collation_element_array(mut char_vals: Vec<u32>, opt: &CollationOptions) 
                         if try_two {
                             try_two = false;
                         } else {
+                            // Otherwise decrement max_right; inner loop may or may not run again
                             max_right -= 1;
                         }
                     }
 
                     // At this point, we're not looking for a discontiguous match. We just need to
-                    // push the weights we found before
+                    // push the weights we found above
 
                     for weights in value {
                         if shifting {
@@ -373,7 +378,7 @@ fn get_collation_element_array(mut char_vals: Vec<u32>, opt: &CollationOptions) 
                 } else if (right + 1) < char_vals.len() {
                     right + 1
                 } else {
-                    // This should skip the loop below
+                    // This should skip the loop below. There will be no discontiguous match
                     right
                 };
 
@@ -437,6 +442,7 @@ fn get_collation_element_array(mut char_vals: Vec<u32>, opt: &CollationOptions) 
                     if try_two {
                         try_two = false;
                     } else {
+                        // Otherwise decrement max_right; inner loop may or may not run again
                         max_right -= 1;
                     }
                 }
