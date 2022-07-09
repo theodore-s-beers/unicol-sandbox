@@ -56,28 +56,33 @@ pub enum KeysSource {
 
 pub static PARSED: Lazy<HashMap<Vec<u32>, Vec<Weights>>> = Lazy::new(parse_keys);
 
-static SINGLES: &[u8; 662_610] = include_bytes!("bincode/singles");
-static MULTIS: &[u8; 35_328] = include_bytes!("bincode/multis");
-static SINGLES_CLDR: &[u8; 662_466] = include_bytes!("bincode/singles_cldr");
-static MULTIS_CLDR: &[u8; 35_724] = include_bytes!("bincode/multis_cldr");
-
-static S_KEYS: Lazy<HashMap<u32, Vec<Weights>>> = Lazy::new(|| {
-    let decoded: HashMap<u32, Vec<Weights>> = bincode::deserialize(SINGLES).unwrap();
+static FCD: Lazy<HashMap<u32, [u8; 2]>> = Lazy::new(|| {
+    let data = include_bytes!("bincode/fcd");
+    let decoded: HashMap<u32, [u8; 2]> = bincode::deserialize(data).unwrap();
     decoded
 });
 
-static M_KEYS: Lazy<HashMap<Vec<u32>, Vec<Weights>>> = Lazy::new(|| {
-    let decoded: HashMap<Vec<u32>, Vec<Weights>> = bincode::deserialize(MULTIS).unwrap();
+static SING: Lazy<HashMap<u32, Vec<Weights>>> = Lazy::new(|| {
+    let data = include_bytes!("bincode/singles");
+    let decoded: HashMap<u32, Vec<Weights>> = bincode::deserialize(data).unwrap();
     decoded
 });
 
-static S_KEYS_CLDR: Lazy<HashMap<u32, Vec<Weights>>> = Lazy::new(|| {
-    let decoded: HashMap<u32, Vec<Weights>> = bincode::deserialize(SINGLES_CLDR).unwrap();
+static MULT: Lazy<HashMap<Vec<u32>, Vec<Weights>>> = Lazy::new(|| {
+    let data = include_bytes!("bincode/multis");
+    let decoded: HashMap<Vec<u32>, Vec<Weights>> = bincode::deserialize(data).unwrap();
     decoded
 });
 
-static M_KEYS_CLDR: Lazy<HashMap<Vec<u32>, Vec<Weights>>> = Lazy::new(|| {
-    let decoded: HashMap<Vec<u32>, Vec<Weights>> = bincode::deserialize(MULTIS_CLDR).unwrap();
+static SING_CLDR: Lazy<HashMap<u32, Vec<Weights>>> = Lazy::new(|| {
+    let data = include_bytes!("bincode/singles_cldr");
+    let decoded: HashMap<u32, Vec<Weights>> = bincode::deserialize(data).unwrap();
+    decoded
+});
+
+static MULT_CLDR: Lazy<HashMap<Vec<u32>, Vec<Weights>>> = Lazy::new(|| {
+    let data = include_bytes!("bincode/multis_cldr");
+    let decoded: HashMap<Vec<u32>, Vec<Weights>> = bincode::deserialize(data).unwrap();
     decoded
 });
 
@@ -165,12 +170,48 @@ pub fn nfd_to_sk(input: Vec<u32>, options: &CollationOptions) -> Vec<u16> {
 }
 
 pub fn get_nfd(input: &str) -> Vec<u32> {
-    UnicodeNormalization::nfd(input).map(|c| c as u32).collect()
+    if fcd(input) {
+        input.chars().map(|c| c as u32).collect()
+    } else {
+        UnicodeNormalization::nfd(input).map(|c| c as u32).collect()
+    }
 }
 
 //
 // Functions, private
 //
+
+pub fn fcd(input: &str) -> bool {
+    let mut c_as_u32: u32;
+    let mut curr_lead_cc: u8;
+    let mut curr_trail_cc: u8;
+
+    let mut prev_trail_cc: u8 = 0;
+
+    for c in input.chars() {
+        c_as_u32 = c as u32;
+
+        if c_as_u32 == 3_969 || (44_032..=55_215).contains(&c_as_u32) {
+            return false;
+        }
+
+        if let Some(vals) = FCD.get(&c_as_u32) {
+            curr_lead_cc = vals[0];
+            curr_trail_cc = vals[1];
+        } else {
+            curr_lead_cc = get_ccc(c) as u8;
+            curr_trail_cc = get_ccc(c) as u8;
+        }
+
+        if curr_lead_cc != 0 && curr_lead_cc < prev_trail_cc {
+            return false;
+        }
+
+        prev_trail_cc = curr_trail_cc;
+    }
+
+    true
+}
 
 fn get_sort_key(collation_element_array: &[Vec<u16>], shifting: bool) -> Vec<u16> {
     let max_level = if shifting { 4 } else { 3 };
@@ -197,8 +238,8 @@ fn get_collation_element_array(mut char_vals: Vec<u32>, opt: &CollationOptions) 
     let cldr = opt.keys_source == KeysSource::Cldr;
     let shifting = opt.shifting;
 
-    let singles = if cldr { &S_KEYS_CLDR } else { &S_KEYS };
-    let multis = if cldr { &M_KEYS_CLDR } else { &M_KEYS };
+    let singles = if cldr { &SING_CLDR } else { &SING };
+    let multis = if cldr { &MULT_CLDR } else { &MULT };
 
     let mut left: usize = 0;
     let mut last_variable = false;
@@ -621,6 +662,91 @@ fn parse_keys() -> HashMap<Vec<u32>, Vec<Weights>> {
     std::fs::write("byte_dump", bytes).unwrap();
 
     map
+}
+
+pub fn parse_fcd() -> HashMap<u32, [u8; 2]> {
+    let mut map = HashMap::new();
+
+    let data = std::fs::read_to_string("test-data/UnicodeData.txt").unwrap();
+
+    for line in data.lines() {
+        if line.is_empty() {
+            continue;
+        }
+
+        let splits: Vec<&str> = line.split(';').collect();
+
+        let code_point = u32::from_str_radix(splits[0], 16).unwrap();
+
+        let cc: u8 = splits[3].parse().unwrap();
+
+        let decomp = splits[5];
+
+        let mut decomp_vals: Vec<u32> = Vec::new();
+        let re = regex!(r"[\dA-F]{4,5}");
+
+        for cap in re.captures_iter(decomp) {
+            decomp_vals.push(u32::from_str_radix(&cap[0], 16).unwrap());
+        }
+
+        if decomp_vals.len() == 1 {
+            let full = get_canonical_decomp(splits[0]);
+
+            decomp_vals = Vec::new();
+
+            for cap in re.captures_iter(&full) {
+                decomp_vals.push(u32::from_str_radix(&cap[0], 16).unwrap());
+            }
+        }
+
+        if !decomp_vals.is_empty() {
+            let first_char = char::from_u32(decomp_vals[0]).unwrap();
+            let first_cc = get_ccc(first_char) as u8;
+
+            let last_char = char::from_u32(decomp_vals[decomp_vals.len() - 1]).unwrap();
+            let last_cc = get_ccc(last_char) as u8;
+
+            map.insert(code_point, [first_cc, last_cc]);
+        } else {
+            map.insert(code_point, [cc, cc]);
+        }
+    }
+
+    let bytes = bincode::serialize(&map).unwrap();
+    std::fs::write("byte_dump", bytes).unwrap();
+
+    map
+}
+
+fn get_canonical_decomp(code_point: &str) -> String {
+    let data = std::fs::read_to_string("test-data/UnicodeData.txt").unwrap();
+
+    for line in data.lines() {
+        if line.starts_with(code_point) {
+            let decomp = line.split(';').nth(5).unwrap();
+
+            let re = regex!(r"[\dA-F]{4,5}");
+
+            let mut decomp_vals: Vec<u32> = Vec::new();
+
+            for cap in re.captures_iter(decomp) {
+                decomp_vals.push(u32::from_str_radix(&cap[0], 16).unwrap());
+            }
+
+            if decomp_vals.len() > 1 {
+                return decomp.into();
+            }
+
+            if decomp_vals.len() == 1 {
+                let num_as_str = format!("{:04X}", decomp_vals[0]);
+                return get_canonical_decomp(&num_as_str);
+            }
+
+            break;
+        }
+    }
+
+    code_point.into()
 }
 
 #[cfg(test)]
