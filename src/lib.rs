@@ -11,7 +11,9 @@ use unicode_normalization::UnicodeNormalization;
 // Structs etc.
 //
 
-#[derive(Deserialize, Serialize)]
+#[derive(
+    Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Hash, Debug, Default, Deserialize, Serialize,
+)]
 pub struct Weights {
     variable: bool,
     primary: u16,
@@ -21,15 +23,11 @@ pub struct Weights {
 
 impl Weights {
     fn new() -> Self {
-        Self {
-            variable: false,
-            primary: 0,
-            secondary: 0,
-            tertiary: 0,
-        }
+        Default::default()
     }
 }
 
+#[derive(Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Hash, Debug)]
 pub struct CollationOptions {
     pub keys_source: KeysSource,
     pub shifting: bool,
@@ -44,7 +42,7 @@ impl Default for CollationOptions {
     }
 }
 
-#[derive(PartialEq, Eq)]
+#[derive(Copy, Clone, PartialEq, Eq, Ord, PartialOrd, Hash, Debug)]
 pub enum KeysSource {
     Cldr,
     Ducet,
@@ -113,7 +111,7 @@ macro_rules! regex {
 // Functions, public
 //
 
-pub fn collate(str_a: &str, str_b: &str, options: &CollationOptions) -> Ordering {
+pub fn collate(str_a: &str, str_b: &str, options: CollationOptions) -> Ordering {
     let a_nfd = get_nfd(str_a);
     let b_nfd = get_nfd(str_b);
 
@@ -134,7 +132,7 @@ pub fn collate(str_a: &str, str_b: &str, options: &CollationOptions) -> Ordering
     comparison
 }
 
-pub fn collate_no_tiebreak(str_a: &str, str_b: &str, options: &CollationOptions) -> Ordering {
+pub fn collate_no_tiebreak(str_a: &str, str_b: &str, options: CollationOptions) -> Ordering {
     if str_a == str_b {
         return Ordering::Equal;
     }
@@ -200,7 +198,7 @@ fn compare_sort_keys(a: &[u16], b: &[u16]) -> Ordering {
     Ordering::Equal
 }
 
-fn nfd_to_sk(input: Vec<u32>, options: &CollationOptions) -> Vec<u16> {
+fn nfd_to_sk(input: Vec<u32>, options: CollationOptions) -> Vec<u16> {
     let collation_element_array = get_collation_element_array(input, options);
     get_sort_key(&collation_element_array, options.shifting)
 }
@@ -272,7 +270,7 @@ fn get_sort_key(collation_element_array: &[Vec<u16>], shifting: bool) -> Vec<u16
     sort_key
 }
 
-fn get_collation_element_array(mut char_vals: Vec<u32>, opt: &CollationOptions) -> Vec<Vec<u16>> {
+fn get_collation_element_array(mut char_vals: Vec<u32>, opt: CollationOptions) -> Vec<Vec<u16>> {
     let mut cea: Vec<Vec<u16>> = Vec::new();
 
     let cldr = opt.keys_source == KeysSource::Cldr;
@@ -807,7 +805,7 @@ mod tests {
             shifting: true,
         };
 
-        scrambled.sort_by(|a, b| collate(a, b, &options));
+        scrambled.sort_by(|a, b| collate(a, b, options));
 
         let sorted = [
             "death", "de luge", "de-luge", "de-luge", "deluge", "de Luge", "de-Luge", "de-Luge",
@@ -844,7 +842,7 @@ mod tests {
             shifting: true,
         };
 
-        scrambled.sort_by(|a, b| collate(a, b, &options));
+        scrambled.sort_by(|a, b| collate(a, b, options));
 
         let sorted = [
             "ab©",

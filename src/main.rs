@@ -15,7 +15,7 @@ fn main() {
         shifting: false,
     };
 
-    conformance(path, &options);
+    conformance(path, options);
 
     println!("Passed CollationTest_NON_IGNORABLE");
 
@@ -30,7 +30,7 @@ fn main() {
         shifting: true,
     };
 
-    conformance(path, &options);
+    conformance(path, options);
 
     println!("Passed CollationTest_SHIFTED");
 
@@ -45,7 +45,7 @@ fn main() {
         shifting: false,
     };
 
-    conformance(path, &options);
+    conformance(path, options);
 
     println!("Passed CollationTest_CLDR_NON_IGNORABLE");
 
@@ -60,12 +60,12 @@ fn main() {
         shifting: true,
     };
 
-    conformance(path, &options);
+    conformance(path, options);
 
     println!("Passed CollationTest_CLDR_SHIFTED");
 }
 
-fn conformance(path: &str, options: &CollationOptions) {
+fn conformance(path: &str, options: CollationOptions) {
     let test_data = std::fs::read_to_string(path).unwrap();
 
     let mut max_line = String::new();

@@ -23,7 +23,7 @@ fn conformance(path: &str, options: CollationOptions) {
             test_string.push(c);
         }
 
-        let comparison = collate_no_tiebreak(&test_string, &max_line, &options);
+        let comparison = collate_no_tiebreak(&test_string, &max_line, options);
         if comparison == Ordering::Less {
             panic!();
         }
