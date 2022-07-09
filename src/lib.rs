@@ -56,9 +56,9 @@ pub enum KeysSource {
 
 pub static PARSED: Lazy<HashMap<Vec<u32>, Vec<Weights>>> = Lazy::new(parse_keys);
 
-static FCD: Lazy<HashMap<u32, [u8; 2]>> = Lazy::new(|| {
+static FCD: Lazy<HashMap<u32, u16>> = Lazy::new(|| {
     let data = include_bytes!("bincode/fcd");
-    let decoded: HashMap<u32, [u8; 2]> = bincode::deserialize(data).unwrap();
+    let decoded: HashMap<u32, u16> = bincode::deserialize(data).unwrap();
     decoded
 });
 
@@ -201,8 +201,7 @@ pub fn fcd(input: &str) -> bool {
         }
 
         if let Some(vals) = FCD.get(&c_as_u32) {
-            curr_lead_cc = vals[0];
-            curr_trail_cc = vals[1];
+            [curr_lead_cc, curr_trail_cc] = vals.to_be_bytes();
         } else {
             curr_lead_cc = get_ccc(c) as u8;
             curr_trail_cc = get_ccc(c) as u8;
@@ -669,7 +668,7 @@ fn parse_keys() -> HashMap<Vec<u32>, Vec<Weights>> {
     map
 }
 
-pub fn parse_fcd() -> HashMap<u32, [u8; 2]> {
+pub fn parse_fcd() -> HashMap<u32, u16> {
     let mut map = HashMap::new();
 
     let data = std::fs::read_to_string("test-data/UnicodeData.txt").unwrap();
@@ -711,9 +710,11 @@ pub fn parse_fcd() -> HashMap<u32, [u8; 2]> {
             let last_char = char::from_u32(decomp_vals[decomp_vals.len() - 1]).unwrap();
             let last_cc = get_ccc(last_char) as u8;
 
-            map.insert(code_point, [first_cc, last_cc]);
+            let packed = ((first_cc as u16) << 8) | last_cc as u16;
+            map.insert(code_point, packed);
         } else {
-            map.insert(code_point, [cc, cc]);
+            let packed = ((cc as u16) << 8) | cc as u16;
+            map.insert(code_point, packed);
         }
     }
 
