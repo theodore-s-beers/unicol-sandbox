@@ -1,11 +1,11 @@
 use criterion::{criterion_group, criterion_main, Criterion};
 use std::cmp::Ordering;
-use unicol_sandbox::{compare_sort_keys, get_nfd, nfd_to_sk, CollationOptions, KeysSource};
+use unicol_sandbox::{collate_no_tiebreak, CollationOptions, KeysSource};
 
 fn conformance(path: &str, options: CollationOptions) {
     let test_data = std::fs::read_to_string(path).unwrap();
 
-    let mut max_sk: Vec<u16> = Vec::new();
+    let mut max_line = String::new();
 
     for line in test_data.lines() {
         if line.is_empty() || line.starts_with('#') {
@@ -23,15 +23,12 @@ fn conformance(path: &str, options: CollationOptions) {
             test_string.push(c);
         }
 
-        let nfd = get_nfd(&test_string);
-        let sk = nfd_to_sk(nfd, &options);
-
-        let comparison = compare_sort_keys(&sk, &max_sk);
+        let comparison = collate_no_tiebreak(&test_string, &max_line, &options);
         if comparison == Ordering::Less {
             panic!();
         }
 
-        max_sk = sk;
+        max_line = test_string;
     }
 }
 
