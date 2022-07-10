@@ -4,6 +4,7 @@ use std::collections::HashMap;
 use once_cell::sync::{Lazy, OnceCell};
 use regex::Regex;
 use serde::{Deserialize, Serialize};
+use tinyvec::{array_vec, ArrayVec};
 use unicode_canonical_combining_class::get_canonical_combining_class as get_ccc;
 use unicode_normalization::UnicodeNormalization;
 
@@ -251,7 +252,7 @@ fn nfd_to_sk(nfd: &mut Vec<u32>, opt: CollationOptions) -> Vec<u16> {
     get_sort_key(&collation_element_array, opt.shifting)
 }
 
-fn get_sort_key(collation_element_array: &[Vec<u16>], shifting: bool) -> Vec<u16> {
+fn get_sort_key(collation_element_array: &[ArrayVec<[u16; 4]>], shifting: bool) -> Vec<u16> {
     let max_level = if shifting { 4 } else { 3 };
     let mut sort_key: Vec<u16> = Vec::new();
 
@@ -286,8 +287,11 @@ fn compare_sort_keys(a: &[u16], b: &[u16]) -> Ordering {
     Ordering::Equal
 }
 
-fn get_collation_element_array(char_vals: &mut Vec<u32>, opt: CollationOptions) -> Vec<Vec<u16>> {
-    let mut cea: Vec<Vec<u16>> = Vec::new();
+fn get_collation_element_array(
+    char_vals: &mut Vec<u32>,
+    opt: CollationOptions,
+) -> Vec<ArrayVec<[u16; 4]>> {
+    let mut cea: Vec<ArrayVec<[u16; 4]>> = Vec::new();
 
     let cldr = opt.keys_source == KeysSource::Cldr;
     let shifting = opt.shifting;
@@ -326,8 +330,7 @@ fn get_collation_element_array(char_vals: &mut Vec<u32>, opt: CollationOptions) 
                             last_variable = false;
                         }
                     } else {
-                        let weight_values =
-                            vec![weights.primary, weights.secondary, weights.tertiary];
+                        let weight_values = array_vec!([u16; 4] => weights.primary, weights.secondary, weights.tertiary);
                         cea.push(weight_values);
                     }
                 }
@@ -404,8 +407,7 @@ fn get_collation_element_array(char_vals: &mut Vec<u32>, opt: CollationOptions) 
                                         last_variable = false;
                                     }
                                 } else {
-                                    let weight_values =
-                                        vec![weights.primary, weights.secondary, weights.tertiary];
+                                    let weight_values = array_vec!([u16; 4] => weights.primary, weights.secondary, weights.tertiary);
                                     cea.push(weight_values);
                                 }
                             }
@@ -444,8 +446,7 @@ fn get_collation_element_array(char_vals: &mut Vec<u32>, opt: CollationOptions) 
                                 last_variable = false;
                             }
                         } else {
-                            let weight_values =
-                                vec![weights.primary, weights.secondary, weights.tertiary];
+                            let weight_values = array_vec!([u16; 4] => weights.primary, weights.secondary, weights.tertiary);
                             cea.push(weight_values);
                         }
                     }
@@ -515,8 +516,7 @@ fn get_collation_element_array(char_vals: &mut Vec<u32>, opt: CollationOptions) 
                                     last_variable = false;
                                 }
                             } else {
-                                let weight_values =
-                                    vec![weights.primary, weights.secondary, weights.tertiary];
+                                let weight_values = array_vec!([u16; 4] => weights.primary, weights.secondary, weights.tertiary);
                                 cea.push(weight_values);
                             }
                         }
@@ -555,8 +555,7 @@ fn get_collation_element_array(char_vals: &mut Vec<u32>, opt: CollationOptions) 
                             last_variable = false;
                         }
                     } else {
-                        let weight_values =
-                            vec![weights.primary, weights.secondary, weights.tertiary];
+                        let weight_values = array_vec!([u16; 4] => weights.primary, weights.secondary, weights.tertiary);
                         cea.push(weight_values);
                     }
                 }
@@ -586,19 +585,19 @@ fn get_collation_element_array(char_vals: &mut Vec<u32>, opt: CollationOptions) 
     cea
 }
 
-fn get_weights_shifting(weights: &Weights, last_variable: bool) -> Vec<u16> {
+fn get_weights_shifting(weights: &Weights, last_variable: bool) -> ArrayVec<[u16; 4]> {
     if weights.primary == 0 && weights.secondary == 0 && weights.tertiary == 0 {
-        vec![0, 0, 0, 0]
+        ArrayVec::from([0, 0, 0, 0])
     } else if weights.variable {
-        vec![0, 0, 0, weights.primary]
+        ArrayVec::from([0, 0, 0, weights.primary])
     } else if last_variable && weights.primary == 0 && weights.tertiary != 0 {
-        vec![0, 0, 0, 0]
+        ArrayVec::from([0, 0, 0, 0])
     } else {
-        vec![weights.primary, weights.secondary, weights.tertiary, 65_535]
+        ArrayVec::from([weights.primary, weights.secondary, weights.tertiary, 65_535])
     }
 }
 
-fn get_implicit_a(left_val: u32, shifting: bool) -> Vec<u16> {
+fn get_implicit_a(left_val: u32, shifting: bool) -> ArrayVec<[u16; 4]> {
     #[allow(clippy::manual_range_contains)]
     let mut aaaa = match left_val {
         x if x >= 13_312 && x <= 19_903 => 64_384 + (left_val >> 15), //     CJK2
@@ -621,15 +620,15 @@ fn get_implicit_a(left_val: u32, shifting: bool) -> Vec<u16> {
     #[allow(clippy::cast_possible_truncation)]
     let first_weights = if shifting {
         // Add an arbitrary fourth weight if shifting
-        vec![aaaa as u16, 32, 2, 65_535]
+        ArrayVec::from([aaaa as u16, 32, 2, 65_535])
     } else {
-        vec![aaaa as u16, 32, 2]
+        array_vec!([u16; 4] => aaaa as u16, 32, 2)
     };
 
     first_weights
 }
 
-fn get_implicit_b(left_val: u32, shifting: bool) -> Vec<u16> {
+fn get_implicit_b(left_val: u32, shifting: bool) -> ArrayVec<[u16; 4]> {
     #[allow(clippy::manual_range_contains)]
     let mut bbbb = match left_val {
         x if x >= 13_312 && x <= 19_903 => left_val & 32_767, //      CJK2
@@ -655,9 +654,9 @@ fn get_implicit_b(left_val: u32, shifting: bool) -> Vec<u16> {
     #[allow(clippy::cast_possible_truncation)]
     let second_weights = if shifting {
         // Add an arbitrary fourth weight if shifting
-        vec![bbbb as u16, 0, 0, 65_535]
+        ArrayVec::from([bbbb as u16, 0, 0, 65_535])
     } else {
-        vec![bbbb as u16, 0, 0]
+        array_vec!([u16; 4] => bbbb as u16, 0, 0)
     };
 
     second_weights
