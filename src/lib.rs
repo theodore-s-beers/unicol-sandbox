@@ -52,8 +52,6 @@ pub enum KeysSource {
 // Static/const
 //
 
-pub static PARSED: Lazy<HashMap<Vec<u32>, Vec<Weights>>> = Lazy::new(parse_keys);
-
 static FCD: Lazy<HashMap<u32, u16>> = Lazy::new(|| {
     let data = include_bytes!("bincode/fcd");
     let decoded: HashMap<u32, u16> = bincode::deserialize(data).unwrap();
@@ -111,16 +109,29 @@ macro_rules! regex {
 // Functions, public
 //
 
-pub fn collate(str_a: &str, str_b: &str, options: CollationOptions) -> Ordering {
-    let a_nfd = get_nfd(str_a);
-    let b_nfd = get_nfd(str_b);
-
-    if a_nfd == b_nfd {
+pub fn collate(str_a: &str, str_b: &str, opt: CollationOptions) -> Ordering {
+    // Early out
+    if str_a == str_b {
         return Ordering::Equal;
     }
 
-    let a_sk = nfd_to_sk(a_nfd, options);
-    let b_sk = nfd_to_sk(b_nfd, options);
+    // Get NFD if necessary (i.e., if not FCD)
+    let mut a_nfd = get_nfd(str_a);
+    let mut b_nfd = get_nfd(str_b);
+
+    // Slightly less early out
+    if a_nfd == b_nfd {
+        // Tiebreaker
+        return str_a.cmp(str_b);
+    }
+
+    // Trim shared prefix if possible
+    let cldr = opt.keys_source == KeysSource::Cldr;
+    trim_prefix(&mut a_nfd, &mut b_nfd, cldr);
+
+    // Generate sort keys... this is where things get expensive
+    let a_sk = nfd_to_sk(&mut a_nfd, opt);
+    let b_sk = nfd_to_sk(&mut b_nfd, opt);
 
     let comparison = compare_sort_keys(&a_sk, &b_sk);
 
@@ -132,76 +143,35 @@ pub fn collate(str_a: &str, str_b: &str, options: CollationOptions) -> Ordering 
     comparison
 }
 
-pub fn collate_no_tiebreak(str_a: &str, str_b: &str, options: CollationOptions) -> Ordering {
+pub fn collate_no_tiebreak(str_a: &str, str_b: &str, opt: CollationOptions) -> Ordering {
+    // Early out
     if str_a == str_b {
         return Ordering::Equal;
     }
 
+    // Get NFD if necessary (i.e., if not FCD)
     let mut a_nfd = get_nfd(str_a);
     let mut b_nfd = get_nfd(str_b);
 
+    // Slightly less early out (but no tiebreaker)
     if a_nfd == b_nfd {
         return Ordering::Equal;
     }
 
-    let cldr = options.keys_source == KeysSource::Cldr;
+    // Trim shared prefix if possible
+    let cldr = opt.keys_source == KeysSource::Cldr;
     trim_prefix(&mut a_nfd, &mut b_nfd, cldr);
 
-    let a_sk = nfd_to_sk(a_nfd, options);
-    let b_sk = nfd_to_sk(b_nfd, options);
+    // Generate sort keys... this is where things get expensive
+    let a_sk = nfd_to_sk(&mut a_nfd, opt);
+    let b_sk = nfd_to_sk(&mut b_nfd, opt);
 
     compare_sort_keys(&a_sk, &b_sk)
 }
 
-fn trim_prefix(a: &mut Vec<u32>, b: &mut Vec<u32>, cldr: bool) {
-    let prefix_len = find_prefix(a, b);
-
-    if prefix_len > 0 {
-        for elem in &a[0..prefix_len] {
-            if NEED_THREE.contains(elem) || NEED_TWO.contains(elem) {
-                return;
-            }
-        }
-
-        let sing = if cldr { &SING_CLDR } else { &SING };
-
-        if let Some(row) = sing.get(&a[prefix_len - 1]) {
-            for weights in row {
-                if weights.variable || weights.primary == 0 {
-                    return;
-                }
-            }
-        }
-
-        a.drain(0..prefix_len);
-        b.drain(0..prefix_len);
-    }
-}
-
-fn find_prefix(a: &[u32], b: &[u32]) -> usize {
-    a.iter().zip(b).take_while(|(x, y)| x == y).count()
-}
-
-fn compare_sort_keys(a: &[u16], b: &[u16]) -> Ordering {
-    let min_sort_key_length = a.len().min(b.len());
-
-    for i in 0..min_sort_key_length {
-        if a[i] < b[i] {
-            return Ordering::Less;
-        }
-
-        if a[i] > b[i] {
-            return Ordering::Greater;
-        }
-    }
-
-    Ordering::Equal
-}
-
-fn nfd_to_sk(input: Vec<u32>, options: CollationOptions) -> Vec<u16> {
-    let collation_element_array = get_collation_element_array(input, options);
-    get_sort_key(&collation_element_array, options.shifting)
-}
+//
+// Functions, private
+//
 
 fn get_nfd(input: &str) -> Vec<u32> {
     if fcd(input) {
@@ -210,10 +180,6 @@ fn get_nfd(input: &str) -> Vec<u32> {
         UnicodeNormalization::nfd(input).map(|c| c as u32).collect()
     }
 }
-
-//
-// Functions, private
-//
 
 fn fcd(input: &str) -> bool {
     let mut c_as_u32: u32;
@@ -251,6 +217,40 @@ fn fcd(input: &str) -> bool {
     true
 }
 
+fn trim_prefix(a: &mut Vec<u32>, b: &mut Vec<u32>, cldr: bool) {
+    let prefix_len = find_prefix(a, b);
+
+    if prefix_len > 0 {
+        for elem in &a[0..prefix_len] {
+            if NEED_THREE.contains(elem) || NEED_TWO.contains(elem) {
+                return;
+            }
+        }
+
+        let sing = if cldr { &SING_CLDR } else { &SING };
+
+        if let Some(row) = sing.get(&a[prefix_len - 1]) {
+            for weights in row {
+                if weights.variable || weights.primary == 0 {
+                    return;
+                }
+            }
+        }
+
+        a.drain(0..prefix_len);
+        b.drain(0..prefix_len);
+    }
+}
+
+fn find_prefix(a: &[u32], b: &[u32]) -> usize {
+    a.iter().zip(b).take_while(|(x, y)| x == y).count()
+}
+
+fn nfd_to_sk(nfd: &mut Vec<u32>, opt: CollationOptions) -> Vec<u16> {
+    let collation_element_array = get_collation_element_array(nfd, opt);
+    get_sort_key(&collation_element_array, opt.shifting)
+}
+
 fn get_sort_key(collation_element_array: &[Vec<u16>], shifting: bool) -> Vec<u16> {
     let max_level = if shifting { 4 } else { 3 };
     let mut sort_key: Vec<u16> = Vec::new();
@@ -270,7 +270,23 @@ fn get_sort_key(collation_element_array: &[Vec<u16>], shifting: bool) -> Vec<u16
     sort_key
 }
 
-fn get_collation_element_array(mut char_vals: Vec<u32>, opt: CollationOptions) -> Vec<Vec<u16>> {
+fn compare_sort_keys(a: &[u16], b: &[u16]) -> Ordering {
+    let min_sort_key_length = a.len().min(b.len());
+
+    for i in 0..min_sort_key_length {
+        if a[i] < b[i] {
+            return Ordering::Less;
+        }
+
+        if a[i] > b[i] {
+            return Ordering::Greater;
+        }
+    }
+
+    Ordering::Equal
+}
+
+fn get_collation_element_array(char_vals: &mut Vec<u32>, opt: CollationOptions) -> Vec<Vec<u16>> {
     let mut cea: Vec<Vec<u16>> = Vec::new();
 
     let cldr = opt.keys_source == KeysSource::Cldr;
@@ -647,8 +663,11 @@ fn get_implicit_b(left_val: u32, shifting: bool) -> Vec<u16> {
     second_weights
 }
 
-// This is just to generate bincode; not usually run
-fn parse_keys() -> HashMap<Vec<u32>, Vec<Weights>> {
+//
+// Parsing Unicode data (not usually run)
+//
+
+pub fn parse_keys() -> HashMap<Vec<u32>, Vec<Weights>> {
     let keys = std::fs::read_to_string("test-data/allkeys.txt").unwrap();
     let mut map = HashMap::new();
 
