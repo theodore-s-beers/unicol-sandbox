@@ -134,7 +134,7 @@ pub fn collate(str_a: &str, str_b: &str, opt: CollationOptions) -> Ordering {
     let a_sk = nfd_to_sk(&mut a_nfd, opt);
     let b_sk = nfd_to_sk(&mut b_nfd, opt);
 
-    let comparison = compare_sort_keys(&a_sk, &b_sk);
+    let comparison = a_sk.cmp(&b_sk);
 
     if comparison == Ordering::Equal {
         // Tiebreaker
@@ -167,7 +167,7 @@ pub fn collate_no_tiebreak(str_a: &str, str_b: &str, opt: CollationOptions) -> O
     let a_sk = nfd_to_sk(&mut a_nfd, opt);
     let b_sk = nfd_to_sk(&mut b_nfd, opt);
 
-    compare_sort_keys(&a_sk, &b_sk)
+    a_sk.cmp(&b_sk)
 }
 
 //
@@ -248,20 +248,20 @@ fn find_prefix(a: &[u32], b: &[u32]) -> usize {
 }
 
 fn nfd_to_sk(nfd: &mut Vec<u32>, opt: CollationOptions) -> Vec<u16> {
-    let collation_element_array = get_collation_element_array(nfd, opt);
+    let collation_element_array = get_cea(nfd, opt);
     get_sort_key(&collation_element_array, opt.shifting)
 }
 
 fn get_sort_key(collation_element_array: &[ArrayVec<[u16; 4]>], shifting: bool) -> Vec<u16> {
     let max_level = if shifting { 4 } else { 3 };
-    let mut sort_key: Vec<u16> = Vec::new();
+    let mut sort_key = Vec::new();
 
     for i in 0..max_level {
         if i > 0 {
             sort_key.push(0);
         }
 
-        for elem in collation_element_array.iter() {
+        for elem in collation_element_array {
             if elem[i] != 0 {
                 sort_key.push(elem[i]);
             }
@@ -271,26 +271,7 @@ fn get_sort_key(collation_element_array: &[ArrayVec<[u16; 4]>], shifting: bool) 
     sort_key
 }
 
-fn compare_sort_keys(a: &[u16], b: &[u16]) -> Ordering {
-    let min_sort_key_length = a.len().min(b.len());
-
-    for i in 0..min_sort_key_length {
-        if a[i] < b[i] {
-            return Ordering::Less;
-        }
-
-        if a[i] > b[i] {
-            return Ordering::Greater;
-        }
-    }
-
-    Ordering::Equal
-}
-
-fn get_collation_element_array(
-    char_vals: &mut Vec<u32>,
-    opt: CollationOptions,
-) -> Vec<ArrayVec<[u16; 4]>> {
+fn get_cea(char_vals: &mut Vec<u32>, opt: CollationOptions) -> Vec<ArrayVec<[u16; 4]>> {
     let mut cea: Vec<ArrayVec<[u16; 4]>> = Vec::new();
 
     let cldr = opt.keys_source == KeysSource::Cldr;
@@ -330,7 +311,9 @@ fn get_collation_element_array(
                             last_variable = false;
                         }
                     } else {
-                        let weight_values = array_vec!([u16; 4] => weights.primary, weights.secondary, weights.tertiary);
+                        let weight_values = array_vec!(
+                            [u16; 4] => weights.primary, weights.secondary, weights.tertiary
+                        );
                         cea.push(weight_values);
                     }
                 }
@@ -407,7 +390,9 @@ fn get_collation_element_array(
                                         last_variable = false;
                                     }
                                 } else {
-                                    let weight_values = array_vec!([u16; 4] => weights.primary, weights.secondary, weights.tertiary);
+                                    let weight_values = array_vec!(
+                                        [u16; 4] => weights.primary, weights.secondary, weights.tertiary
+                                    );
                                     cea.push(weight_values);
                                 }
                             }
@@ -446,7 +431,9 @@ fn get_collation_element_array(
                                 last_variable = false;
                             }
                         } else {
-                            let weight_values = array_vec!([u16; 4] => weights.primary, weights.secondary, weights.tertiary);
+                            let weight_values = array_vec!(
+                                [u16; 4] => weights.primary, weights.secondary, weights.tertiary
+                            );
                             cea.push(weight_values);
                         }
                     }
@@ -516,7 +503,9 @@ fn get_collation_element_array(
                                     last_variable = false;
                                 }
                             } else {
-                                let weight_values = array_vec!([u16; 4] => weights.primary, weights.secondary, weights.tertiary);
+                                let weight_values = array_vec!(
+                                    [u16; 4] => weights.primary, weights.secondary, weights.tertiary
+                                );
                                 cea.push(weight_values);
                             }
                         }
@@ -555,7 +544,9 @@ fn get_collation_element_array(
                             last_variable = false;
                         }
                     } else {
-                        let weight_values = array_vec!([u16; 4] => weights.primary, weights.secondary, weights.tertiary);
+                        let weight_values = array_vec!(
+                            [u16; 4] => weights.primary, weights.secondary, weights.tertiary
+                        );
                         cea.push(weight_values);
                     }
                 }
