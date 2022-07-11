@@ -505,7 +505,7 @@ fn get_cea(char_vals: &mut Vec<u32>, opt: CollationOptions) -> Vec<ArrayVec<[u16
                         continue 'outer;
                     }
 
-                    // Decrement max_right; inner loop will not run again
+                    // The loop will not run again
                     try_discont = false;
                 }
 
