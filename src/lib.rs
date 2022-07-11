@@ -65,9 +65,9 @@ static SING: Lazy<HashMap<u32, Vec<Weights>>> = Lazy::new(|| {
     decoded
 });
 
-static MULT: Lazy<HashMap<Vec<u32>, Vec<Weights>>> = Lazy::new(|| {
+static MULT: Lazy<HashMap<ArrayVec<[u32; 3]>, Vec<Weights>>> = Lazy::new(|| {
     let data = include_bytes!("bincode/multis");
-    let decoded: HashMap<Vec<u32>, Vec<Weights>> = bincode::deserialize(data).unwrap();
+    let decoded: HashMap<ArrayVec<[u32; 3]>, Vec<Weights>> = bincode::deserialize(data).unwrap();
     decoded
 });
 
@@ -77,9 +77,9 @@ static SING_CLDR: Lazy<HashMap<u32, Vec<Weights>>> = Lazy::new(|| {
     decoded
 });
 
-static MULT_CLDR: Lazy<HashMap<Vec<u32>, Vec<Weights>>> = Lazy::new(|| {
+static MULT_CLDR: Lazy<HashMap<ArrayVec<[u32; 3]>, Vec<Weights>>> = Lazy::new(|| {
     let data = include_bytes!("bincode/multis_cldr");
-    let decoded: HashMap<Vec<u32>, Vec<Weights>> = bincode::deserialize(data).unwrap();
+    let decoded: HashMap<ArrayVec<[u32; 3]>, Vec<Weights>> = bincode::deserialize(data).unwrap();
     decoded
 });
 
@@ -369,11 +369,15 @@ fn get_cea(char_vals: &mut Vec<u32>, opt: CollationOptions) -> Vec<ArrayVec<[u16
                             max_ccc = ccc;
                         }
 
-                        // Having made it this far, we can test a new subset, adding the later char(s)
+                        // Having made it this far, we test a new subset, adding the later char(s)
                         let new_subset = if try_two {
-                            [[left_val].as_slice(), &char_vals[max_right - 1..=max_right]].concat()
+                            ArrayVec::from([
+                                left_val,
+                                char_vals[max_right - 1],
+                                char_vals[max_right],
+                            ])
                         } else {
-                            vec![left_val, char_vals[max_right]]
+                            array_vec!([u32; 3] => left_val, char_vals[max_right])
                         };
 
                         // If the new subset is found in the table...
@@ -453,42 +457,27 @@ fn get_cea(char_vals: &mut Vec<u32>, opt: CollationOptions) -> Vec<ArrayVec<[u16
             // If we got here, we're trying to find a slice
             let subset = &char_vals[left..right];
 
-            if let Some(value) = multis.get(subset) {
-                // If we found it, we need to check for discontiguous matches
-                // Determine how much further right to look
-                let mut max_right = if (right + 2) < char_vals.len() {
-                    right + 2
-                } else if (right + 1) < char_vals.len() {
-                    right + 1
-                } else {
-                    // This should skip the loop below. There will be no discontiguous match
-                    right
-                };
+            if let Some(row) = multis.get(subset) {
+                // If we found it, we may need to check for discontiguous matches.
+                // But that's only if we matched a set of two code points; and we'll only skip over
+                // one more to find a possible third.
+                let mut try_discont = subset.len() == 2 && right + 1 < char_vals.len();
 
-                let mut try_two = max_right - right == 2 && cldr;
-
-                'inner: while max_right > right {
+                'inner: while try_discont {
                     // Need to make sure the sequence of CCCs is kosher
-                    let interest_cohort = &char_vals[right..=max_right];
-                    let mut max_ccc = 0;
+                    let ccc_a = get_ccc(char::from_u32(char_vals[right]).unwrap()) as u8;
+                    let ccc_b = get_ccc(char::from_u32(char_vals[right + 1]).unwrap()) as u8;
 
-                    for elem in interest_cohort {
-                        let ccc = get_ccc(char::from_u32(*elem).unwrap()) as u8;
-                        if ccc == 0 || ccc <= max_ccc {
-                            // Can also forget about try_two in this case
-                            try_two = false;
-                            max_right -= 1;
-                            continue 'inner;
-                        }
-                        max_ccc = ccc;
+                    if ccc_a == 0 || ccc_a >= ccc_b {
+                        // Bail -- no discontiguous match
+                        try_discont = false;
+                        continue 'inner;
                     }
 
-                    // Having made it this far, we can test a new subset, adding the later char(s)
-                    let new_subset = if try_two {
-                        [subset, &char_vals[max_right - 1..=max_right]].concat()
-                    } else {
-                        [subset, [char_vals[max_right]].as_slice()].concat()
-                    };
+                    // Having made it this far, we can test a new subset, adding the later char.
+                    // This only happens when we've found an initial match of two code points and
+                    // want to add a third; so we can be oddly specific.
+                    let new_subset = ArrayVec::from([subset[0], subset[1], char_vals[right + 1]]);
 
                     // If the new subset is found in the table...
                     if let Some(new_value) = multis.get(&new_subset) {
@@ -510,31 +499,22 @@ fn get_cea(char_vals: &mut Vec<u32>, opt: CollationOptions) -> Vec<ArrayVec<[u16
                             }
                         }
 
-                        // Remove the pulled char(s) (in this order!)
-                        char_vals.remove(max_right);
-                        if try_two {
-                            char_vals.remove(max_right - 1);
-                        }
+                        // Remove the pulled char
+                        char_vals.remove(right + 1);
 
                         // Increment and continue outer loop
                         left += right - left;
                         continue 'outer;
                     }
 
-                    // If we tried for two, don't decrement max_right yet
-                    // Inner loop will run again
-                    if try_two {
-                        try_two = false;
-                    } else {
-                        // Otherwise decrement max_right; inner loop may or may not run again
-                        max_right -= 1;
-                    }
+                    // Decrement max_right; inner loop will not run again
+                    try_discont = false;
                 }
 
                 // At this point, we're not looking for a discontiguous match. We just need to push
                 // the weights from the original subset we found
 
-                for weights in value {
+                for weights in row {
                     if shifting {
                         let weight_values = get_weights_shifting(weights, last_variable);
                         cea.push(weight_values);
@@ -657,7 +637,7 @@ fn get_implicit_b(left_val: u32, shifting: bool) -> ArrayVec<[u16; 4]> {
 // Parsing Unicode data (not usually run)
 //
 
-pub fn parse_keys() -> HashMap<Vec<u32>, Vec<Weights>> {
+pub fn parse_keys() -> HashMap<ArrayVec<[u32; 3]>, Vec<Weights>> {
     let keys = std::fs::read_to_string("test-data/allkeys.txt").unwrap();
     let mut map = HashMap::new();
 
@@ -671,7 +651,7 @@ pub fn parse_keys() -> HashMap<Vec<u32>, Vec<Weights>> {
         let right_of_semicolon = split_at_semicolon.next().unwrap();
         let left_of_hash = right_of_semicolon.split('#').next().unwrap();
 
-        let mut k: Vec<u32> = Vec::new();
+        let mut k = ArrayVec::<[u32; 3]>::new();
         let re_key = regex!(r"[\dA-F]{4,5}");
         for cap in re_key.captures_iter(left_of_semicolon) {
             let as_u32 = u32::from_str_radix(&cap[0], 16).unwrap();
