@@ -205,7 +205,7 @@ fn fcd(input: &str) -> bool {
             [curr_lead_cc, curr_trail_cc] = vals.to_be_bytes();
         } else {
             curr_lead_cc = get_ccc(c) as u8;
-            curr_trail_cc = get_ccc(c) as u8;
+            curr_trail_cc = curr_lead_cc;
         }
 
         if curr_lead_cc != 0 && curr_lead_cc < prev_trail_cc {

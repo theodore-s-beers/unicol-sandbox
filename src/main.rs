@@ -144,6 +144,7 @@ fn map_decomps() {
         if (0x3400..=0x4DBF).contains(&code_point) // CJK ext A
             || (0x4E00..=0x9FFF).contains(&code_point) // CJK
             || (0xAC00..=0xD7A3).contains(&code_point)  // Hangul
+            || (0xD800..=0xDFFF).contains(&code_point) // Surrogates
             || (0xE000..=0xF8FF).contains(&code_point)  // Private use
             || (0x17000..=0x187F7).contains(&code_point) // Tangut
             || (0x18D00..=0x18D08).contains(&code_point) // Tangut suppl
@@ -170,12 +171,9 @@ fn map_decomps() {
             decomp.push(u32::from_str_radix(&cap[0], 16).unwrap());
         }
 
-        let final_decomp = if code_point > 55_295 && code_point < 57_344 {
-            // Surrogate code point; return FFFD
-            vec![65_533]
-        } else if decomp_col.contains('<') {
-            // Non-canonical decomposition; return the code point itself
-            vec![code_point]
+        let final_decomp = if decomp_col.contains('<') {
+            // Non-canonical decomposition; continue
+            continue;
         } else if decomp.len() > 1 {
             // Multi-code-point canonical decomposition; recurse badly
             decomp
@@ -189,8 +187,8 @@ fn map_decomps() {
             // Single-code-point canonical decomposition; recurse simply
             get_canonical_decomp(splits[0])
         } else {
-            // No decomposition; return the code point itself
-            vec![code_point]
+            // No decomposition; continue
+            continue;
         };
 
         map.insert(code_point, final_decomp);
@@ -207,7 +205,7 @@ fn get_canonical_decomp(code_point: &str) -> Vec<u32> {
         if line.starts_with(code_point) {
             let decomp_col = line.split(';').nth(5).unwrap();
 
-            // Non-canonical decomposition; return the code point itself
+            // Further decomposition is non-canonical; return the code point itself
             if decomp_col.contains('<') {
                 return vec![u32::from_str_radix(code_point, 16).unwrap()];
             }
@@ -220,7 +218,7 @@ fn get_canonical_decomp(code_point: &str) -> Vec<u32> {
                 decomp.push(u32::from_str_radix(&cap[0], 16).unwrap());
             }
 
-            // Multiple-code-point decomposition; recurse badly
+            // Further multiple-code-point decomposition; recurse badly
             if decomp.len() > 1 {
                 return decomp
                     .into_iter()
@@ -231,7 +229,7 @@ fn get_canonical_decomp(code_point: &str) -> Vec<u32> {
                     .collect::<Vec<u32>>();
             }
 
-            // Single-code-point decomposition; recurse simply
+            // Further single-code-point decomposition; recurse simply
             if decomp.len() == 1 {
                 let as_str = format!("{:04X}", decomp[0]);
                 return get_canonical_decomp(&as_str);
@@ -243,7 +241,7 @@ fn get_canonical_decomp(code_point: &str) -> Vec<u32> {
     }
 
     // This means we followed a canonical decomposition to a single code point that was then not
-    // found in the table. Return it, I guess?
+    // found in the first column of the table. Return it, I guess?
     vec![u32::from_str_radix(code_point, 16).unwrap()]
 }
 
@@ -266,6 +264,7 @@ fn map_fcd() {
         if (0x3400..=0x4DBF).contains(&code_point) // CJK ext A
             || (0x4E00..=0x9FFF).contains(&code_point) // CJK
             || (0xAC00..=0xD7A3).contains(&code_point)  // Hangul
+            || (0xD800..=0xDFFF).contains(&code_point) // Surrogates
             || (0xE000..=0xF8FF).contains(&code_point)  // Private use
             || (0x17000..=0x187F7).contains(&code_point) // Tangut
             || (0x18D00..=0x18D08).contains(&code_point) // Tangut suppl
@@ -282,7 +281,10 @@ fn map_fcd() {
             continue;
         }
 
-        let can_decomp = DECOMP.get(&code_point).unwrap();
+        let can_decomp = match DECOMP.get(&code_point) {
+            Some(cd) => cd,
+            None => continue,
+        };
 
         let decomp_first_ch = char::from_u32(can_decomp[0]).unwrap();
         let first_cc = get_ccc(decomp_first_ch) as u8;
