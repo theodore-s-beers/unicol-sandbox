@@ -2,13 +2,27 @@
 
 use once_cell::sync::{Lazy, OnceCell};
 use regex::Regex;
+use std::collections::HashSet;
 use std::{cmp::Ordering, collections::HashMap};
 use unicode_canonical_combining_class::get_canonical_combining_class as get_ccc;
 use unicol_sandbox::{collate_no_tiebreak, CollationOptions, KeysSource};
 
+const S_BASE: u32 = 0xAC00;
+const L_BASE: u32 = 0x1100;
+const V_BASE: u32 = 0x1161;
+const T_BASE: u32 = 0x11A7;
+const T_COUNT: u32 = 28;
+const N_COUNT: u32 = 588;
+
 static DECOMP: Lazy<HashMap<u32, Vec<u32>>> = Lazy::new(|| {
     let data = include_bytes!("bincode/decomp");
     let decoded: HashMap<u32, Vec<u32>> = bincode::deserialize(data).unwrap();
+    decoded
+});
+
+static JAMO: Lazy<HashSet<u32>> = Lazy::new(|| {
+    let data = include_bytes!("bincode/jamo");
+    let decoded: HashSet<u32> = bincode::deserialize(data).unwrap();
     decoded
 });
 
@@ -126,6 +140,26 @@ fn map_decomps() {
 
         let code_point = u32::from_str_radix(splits[0], 16).unwrap();
 
+        // Ignore these ranges
+        if (0x3400..=0x4DBF).contains(&code_point) // CJK ext A
+            || (0x4E00..=0x9FFF).contains(&code_point) // CJK
+            || (0xAC00..=0xD7A3).contains(&code_point)  // Hangul
+            || (0xE000..=0xF8FF).contains(&code_point)  // Private use
+            || (0x17000..=0x187F7).contains(&code_point) // Tangut
+            || (0x18D00..=0x18D08).contains(&code_point) // Tangut suppl
+            || (0x20000..=0x2A6DF).contains(&code_point) // CJK ext B
+            || (0x2A700..=0x2B738).contains(&code_point) // CJK ext C
+            || (0x2B740..=0x2B81D).contains(&code_point) // CJK ext D
+            || (0x2B820..=0x2CEA1).contains(&code_point) // CJK ext E
+            || (0x2CEB0..=0x2EBE0).contains(&code_point) // CJK ext F
+            || (0x30000..=0x3134A).contains(&code_point) // CJK ext G
+            || (0xF0000..=0xFFFFD).contains(&code_point) // Plane 15 private use
+            // Plane 16 private use
+            || (1_048_576..=1_114_109).contains(&code_point)
+        {
+            continue;
+        }
+
         let decomp_col = splits[5];
 
         let re = regex!(r"[\dA-F]{4,5}");
@@ -143,10 +177,16 @@ fn map_decomps() {
             // Non-canonical decomposition; return the code point itself
             vec![code_point]
         } else if decomp.len() > 1 {
-            // Multi-code-point canonical decomposition; return it
+            // Multi-code-point canonical decomposition; recurse badly
             decomp
+                .into_iter()
+                .flat_map(|x| {
+                    let as_str = format!("{:04X}", x);
+                    get_canonical_decomp(&as_str)
+                })
+                .collect::<Vec<u32>>()
         } else if decomp.len() == 1 {
-            // Single-code-point canonical decomposition; dig deeper
+            // Single-code-point canonical decomposition; recurse simply
             get_canonical_decomp(splits[0])
         } else {
             // No decomposition; return the code point itself
@@ -180,12 +220,18 @@ fn get_canonical_decomp(code_point: &str) -> Vec<u32> {
                 decomp.push(u32::from_str_radix(&cap[0], 16).unwrap());
             }
 
-            // Multiple-code-point decomposition; return it
+            // Multiple-code-point decomposition; recurse badly
             if decomp.len() > 1 {
-                return decomp;
+                return decomp
+                    .into_iter()
+                    .flat_map(|x| {
+                        let as_str = format!("{:04X}", x);
+                        get_canonical_decomp(&as_str)
+                    })
+                    .collect::<Vec<u32>>();
             }
 
-            // Recurse
+            // Single-code-point decomposition; recurse simply
             if decomp.len() == 1 {
                 let as_str = format!("{:04X}", decomp[0]);
                 return get_canonical_decomp(&as_str);
@@ -216,6 +262,26 @@ fn map_fcd() {
 
         let code_point = u32::from_str_radix(left_of_semicolon, 16).unwrap();
 
+        // Ignore these ranges
+        if (0x3400..=0x4DBF).contains(&code_point) // CJK ext A
+            || (0x4E00..=0x9FFF).contains(&code_point) // CJK
+            || (0xAC00..=0xD7A3).contains(&code_point)  // Hangul
+            || (0xE000..=0xF8FF).contains(&code_point)  // Private use
+            || (0x17000..=0x187F7).contains(&code_point) // Tangut
+            || (0x18D00..=0x18D08).contains(&code_point) // Tangut suppl
+            || (0x20000..=0x2A6DF).contains(&code_point) // CJK ext B
+            || (0x2A700..=0x2B738).contains(&code_point) // CJK ext C
+            || (0x2B740..=0x2B81D).contains(&code_point) // CJK ext D
+            || (0x2B820..=0x2CEA1).contains(&code_point) // CJK ext E
+            || (0x2CEB0..=0x2EBE0).contains(&code_point) // CJK ext F
+            || (0x30000..=0x3134A).contains(&code_point) // CJK ext G
+            || (0xF0000..=0xFFFFD).contains(&code_point) // Plane 15 private use
+            // Plane 16 private use
+            || (1_048_576..=1_114_109).contains(&code_point)
+        {
+            continue;
+        }
+
         let can_decomp = DECOMP.get(&code_point).unwrap();
 
         let decomp_first_ch = char::from_u32(can_decomp[0]).unwrap();
@@ -230,4 +296,87 @@ fn map_fcd() {
 
     let bytes = bincode::serialize(&map).unwrap();
     std::fs::write("byte_dump", bytes).unwrap();
+}
+
+#[allow(unused)]
+fn decompose(input: &mut Vec<u32>) {
+    let mut i: usize = 0;
+
+    while i < input.len() {
+        if input[i] >= 0xAC00 && input[i] <= 0xD7A3 {
+            let rep = decompose_jamo(input[i]);
+            let n = rep.len();
+            input.splice(i..=i, rep);
+            i += n;
+            continue;
+        }
+
+        if let Some(rep) = DECOMP.get(&input[i]) {
+            input.splice(i..=i, rep.clone());
+            i += rep.len();
+            continue;
+        }
+
+        i += 1;
+    }
+}
+
+fn decompose_jamo(s: u32) -> Vec<u32> {
+    let s_index = s - S_BASE;
+
+    let lv = JAMO.get(&s).is_some();
+
+    if lv {
+        let l_index = s_index / N_COUNT;
+        let v_index = (s_index % N_COUNT) / T_COUNT;
+
+        let l_part = L_BASE + l_index;
+        let v_part = V_BASE + v_index;
+
+        vec![l_part, v_part]
+    } else {
+        let l_index = s_index / N_COUNT;
+        let v_index = (s_index % N_COUNT) / T_COUNT;
+        let t_index = s_index % T_COUNT;
+
+        let l_part = L_BASE + l_index;
+        let v_part = V_BASE + v_index;
+        let t_part = T_BASE + t_index;
+
+        vec![l_part, v_part, t_part]
+    }
+}
+
+#[allow(unused)]
+fn reorder(input: &mut Vec<u32>) {
+    let mut n = input.len();
+
+    while n > 1 {
+        let mut new_n = 0;
+
+        let mut i = 1;
+
+        while i < n {
+            let ccc_b = get_ccc(char::from_u32(input[i]).unwrap()) as u8;
+
+            if ccc_b == 0 {
+                i += 2;
+                continue;
+            }
+
+            let ccc_a = get_ccc(char::from_u32(input[i - 1]).unwrap()) as u8;
+
+            if ccc_a == 0 || ccc_a <= ccc_b {
+                i += 1;
+                continue;
+            }
+
+            input.swap(i - 1, i);
+
+            new_n = i;
+            i += 1;
+        }
+
+        n = new_n;
+    }
 }
