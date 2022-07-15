@@ -16,10 +16,10 @@ use unicode_normalization::UnicodeNormalization;
     Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Hash, Debug, Default, Deserialize, Serialize,
 )]
 pub struct Weights {
-    variable: bool,
-    primary: u16,
-    secondary: u16,
-    tertiary: u16,
+    pub variable: bool,
+    pub primary: u16,
+    pub secondary: u16,
+    pub tertiary: u16,
 }
 
 impl Weights {
@@ -56,6 +56,18 @@ pub enum KeysSource {
 static FCD: Lazy<HashMap<u32, u16>> = Lazy::new(|| {
     let data = include_bytes!("bincode/fcd");
     let decoded: HashMap<u32, u16> = bincode::deserialize(data).unwrap();
+    decoded
+});
+
+static LOW: Lazy<HashMap<u32, Weights>> = Lazy::new(|| {
+    let data = include_bytes!("bincode/low");
+    let decoded: HashMap<u32, Weights> = bincode::deserialize(data).unwrap();
+    decoded
+});
+
+static LOW_CLDR: Lazy<HashMap<u32, Weights>> = Lazy::new(|| {
+    let data = include_bytes!("bincode/low_cldr");
+    let decoded: HashMap<u32, Weights> = bincode::deserialize(data).unwrap();
     decoded
 });
 
@@ -275,6 +287,7 @@ fn get_cea(char_vals: &mut Vec<u32>, opt: CollationOptions) -> Vec<ArrayVec<[u16
     let cldr = opt.keys_source == KeysSource::Cldr;
     let shifting = opt.shifting;
 
+    let low = if cldr { &LOW_CLDR } else { &LOW };
     let singles = if cldr { &SING_CLDR } else { &SING };
     let multis = if cldr { &MULT_CLDR } else { &MULT };
 
@@ -283,6 +296,28 @@ fn get_cea(char_vals: &mut Vec<u32>, opt: CollationOptions) -> Vec<ArrayVec<[u16
 
     'outer: while left < char_vals.len() {
         let left_val = char_vals[left];
+
+        if left_val < 183 && left_val != 108 && left_val != 76 {
+            let weights = low.get(&left_val).unwrap();
+
+            if shifting {
+                let weight_values = get_weights_shifting(weights, last_variable);
+                cea.push(weight_values);
+                if weights.variable {
+                    last_variable = true;
+                } else if weights.primary != 0 {
+                    last_variable = false;
+                }
+            } else {
+                let weight_values = array_vec!(
+                    [u16; 4] => weights.primary, weights.secondary, weights.tertiary
+                );
+                cea.push(weight_values);
+            }
+
+            left += 1;
+            continue;
+        }
 
         // Set lookahead depending on left_val. We need 3 in a few cases; 2 in several dozen cases;
         // and 1 otherwise.

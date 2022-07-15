@@ -5,7 +5,7 @@ use regex::Regex;
 use std::collections::HashSet;
 use std::{cmp::Ordering, collections::HashMap};
 use unicode_canonical_combining_class::get_canonical_combining_class as get_ccc;
-use unicol_sandbox::{collate_no_tiebreak, CollationOptions, KeysSource};
+use unicol_sandbox::{collate_no_tiebreak, CollationOptions, KeysSource, Weights};
 
 const S_BASE: u32 = 0xAC00;
 const L_BASE: u32 = 0x1100;
@@ -381,4 +381,49 @@ fn reorder(input: &mut Vec<u32>) {
 
         n = new_n;
     }
+}
+
+#[allow(unused)]
+fn map_low() {
+    let data = std::fs::read_to_string("test-data/allkeys.txt").unwrap();
+
+    let re_set_of_weights = regex!(r"[*.\dA-F]{15}");
+    let re_individual_weight = regex!(r"[\dA-F]{4}");
+
+    let mut map: HashMap<u32, Weights> = HashMap::new();
+
+    for i in 0..183 {
+        if i == 76 || i == 108 {
+            continue;
+        }
+
+        let as_hex = format!("{:04X}", i);
+
+        for line in data.lines() {
+            if line.starts_with(&as_hex) {
+                let set = re_set_of_weights.find(line).unwrap().as_str();
+
+                let variable = set.starts_with('*');
+
+                let mut weights = re_individual_weight.find_iter(set);
+                let primary = u16::from_str_radix(weights.next().unwrap().as_str(), 16).unwrap();
+                let secondary = u16::from_str_radix(weights.next().unwrap().as_str(), 16).unwrap();
+                let tertiary = u16::from_str_radix(weights.next().unwrap().as_str(), 16).unwrap();
+
+                let together = Weights {
+                    variable,
+                    primary,
+                    secondary,
+                    tertiary,
+                };
+
+                map.insert(i, together);
+
+                break;
+            }
+        }
+    }
+
+    let bytes = bincode::serialize(&map).unwrap();
+    std::fs::write("byte_dump", bytes).unwrap();
 }
