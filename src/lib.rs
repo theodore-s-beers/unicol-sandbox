@@ -65,12 +65,6 @@ static LOW: Lazy<HashMap<u32, Weights>> = Lazy::new(|| {
     decoded
 });
 
-static LOW_CLDR: Lazy<HashMap<u32, Weights>> = Lazy::new(|| {
-    let data = include_bytes!("bincode/low_cldr");
-    let decoded: HashMap<u32, Weights> = bincode::deserialize(data).unwrap();
-    decoded
-});
-
 static SING: Lazy<HashMap<u32, Vec<Weights>>> = Lazy::new(|| {
     let data = include_bytes!("bincode/singles");
     let decoded: HashMap<u32, Vec<Weights>> = bincode::deserialize(data).unwrap();
@@ -80,6 +74,12 @@ static SING: Lazy<HashMap<u32, Vec<Weights>>> = Lazy::new(|| {
 static MULT: Lazy<HashMap<ArrayVec<[u32; 3]>, Vec<Weights>>> = Lazy::new(|| {
     let data = include_bytes!("bincode/multis");
     let decoded: HashMap<ArrayVec<[u32; 3]>, Vec<Weights>> = bincode::deserialize(data).unwrap();
+    decoded
+});
+
+static LOW_CLDR: Lazy<HashMap<u32, Weights>> = Lazy::new(|| {
+    let data = include_bytes!("bincode/low_cldr");
+    let decoded: HashMap<u32, Weights> = bincode::deserialize(data).unwrap();
     decoded
 });
 
@@ -670,9 +670,63 @@ fn get_implicit_b(left_val: u32, shifting: bool) -> ArrayVec<[u16; 4]> {
 // Parsing Unicode data (not usually run)
 //
 
-pub fn parse_keys() -> HashMap<ArrayVec<[u32; 3]>, Vec<Weights>> {
+pub fn parse_keys_sing() {
     let keys = std::fs::read_to_string("test-data/allkeys.txt").unwrap();
-    let mut map = HashMap::new();
+    let mut map: HashMap<u32, Vec<Weights>> = HashMap::new();
+
+    for line in keys.lines() {
+        if line.is_empty() || line.starts_with('@') || line.starts_with('#') {
+            continue;
+        }
+
+        let mut split_at_semicolon = line.split(';');
+        let left_of_semicolon = split_at_semicolon.next().unwrap();
+        let right_of_semicolon = split_at_semicolon.next().unwrap();
+        let left_of_hash = right_of_semicolon.split('#').next().unwrap();
+
+        let mut points = ArrayVec::<[u32; 3]>::new();
+        let re_key = regex!(r"[\dA-F]{4,5}");
+        for m in re_key.find_iter(left_of_semicolon) {
+            let as_u32 = u32::from_str_radix(m.as_str(), 16).unwrap();
+            points.push(as_u32);
+        }
+
+        if points.len() > 1 {
+            continue;
+        }
+
+        let k = points[0];
+
+        let mut v: Vec<Weights> = Vec::new();
+        let re_weights = regex!(r"[*.\dA-F]{15}");
+        let re_value = regex!(r"[\dA-F]{4}");
+
+        for m in re_weights.find_iter(left_of_hash) {
+            let weights_str = m.as_str();
+            let mut weights = Weights::new();
+
+            if weights_str.starts_with('*') {
+                weights.variable = true;
+            }
+
+            let mut vals = re_value.find_iter(weights_str);
+            weights.primary = u16::from_str_radix(vals.next().unwrap().as_str(), 16).unwrap();
+            weights.secondary = u16::from_str_radix(vals.next().unwrap().as_str(), 16).unwrap();
+            weights.tertiary = u16::from_str_radix(vals.next().unwrap().as_str(), 16).unwrap();
+
+            v.push(weights);
+        }
+
+        map.insert(k, v);
+    }
+
+    let bytes = bincode::serialize(&map).unwrap();
+    std::fs::write("byte_dump", bytes).unwrap();
+}
+
+pub fn parse_keys_multi() {
+    let keys = std::fs::read_to_string("test-data/allkeys.txt").unwrap();
+    let mut map: HashMap<ArrayVec<[u32; 3]>, Vec<Weights>> = HashMap::new();
 
     for line in keys.lines() {
         if line.is_empty() || line.starts_with('@') || line.starts_with('#') {
@@ -686,8 +740,8 @@ pub fn parse_keys() -> HashMap<ArrayVec<[u32; 3]>, Vec<Weights>> {
 
         let mut k = ArrayVec::<[u32; 3]>::new();
         let re_key = regex!(r"[\dA-F]{4,5}");
-        for cap in re_key.captures_iter(left_of_semicolon) {
-            let as_u32 = u32::from_str_radix(&cap[0], 16).unwrap();
+        for m in re_key.find_iter(left_of_semicolon) {
+            let as_u32 = u32::from_str_radix(m.as_str(), 16).unwrap();
             k.push(as_u32);
         }
 
@@ -699,18 +753,18 @@ pub fn parse_keys() -> HashMap<ArrayVec<[u32; 3]>, Vec<Weights>> {
         let re_weights = regex!(r"[*.\dA-F]{15}");
         let re_value = regex!(r"[\dA-F]{4}");
 
-        for cap in re_weights.captures_iter(left_of_hash) {
-            let weights_str = &cap[0];
-            let mut weights: Weights = Weights::new();
+        for m in re_weights.find_iter(left_of_hash) {
+            let weights_str = m.as_str();
+            let mut weights = Weights::new();
 
-            if weights_str.contains('*') {
+            if weights_str.starts_with('*') {
                 weights.variable = true;
             }
 
-            let mut vals = re_value.captures_iter(weights_str);
-            weights.primary = u16::from_str_radix(&vals.next().unwrap()[0], 16).unwrap();
-            weights.secondary = u16::from_str_radix(&vals.next().unwrap()[0], 16).unwrap();
-            weights.tertiary = u16::from_str_radix(&vals.next().unwrap()[0], 16).unwrap();
+            let mut vals = re_value.find_iter(weights_str);
+            weights.primary = u16::from_str_radix(vals.next().unwrap().as_str(), 16).unwrap();
+            weights.secondary = u16::from_str_radix(vals.next().unwrap().as_str(), 16).unwrap();
+            weights.tertiary = u16::from_str_radix(vals.next().unwrap().as_str(), 16).unwrap();
 
             v.push(weights);
         }
@@ -720,95 +774,6 @@ pub fn parse_keys() -> HashMap<ArrayVec<[u32; 3]>, Vec<Weights>> {
 
     let bytes = bincode::serialize(&map).unwrap();
     std::fs::write("byte_dump", bytes).unwrap();
-
-    map
-}
-
-pub fn parse_fcd() -> HashMap<u32, u16> {
-    let mut map = HashMap::new();
-
-    let data = std::fs::read_to_string("test-data/UnicodeData.txt").unwrap();
-
-    for line in data.lines() {
-        if line.is_empty() {
-            continue;
-        }
-
-        let splits: Vec<&str> = line.split(';').collect();
-
-        let code_point = u32::from_str_radix(splits[0], 16).unwrap();
-
-        let cc: u8 = splits[3].parse().unwrap();
-
-        let decomp = splits[5];
-
-        let mut decomp_vals: Vec<u32> = Vec::new();
-        let re = regex!(r"[\dA-F]{4,5}");
-
-        for cap in re.captures_iter(decomp) {
-            decomp_vals.push(u32::from_str_radix(&cap[0], 16).unwrap());
-        }
-
-        if decomp_vals.len() == 1 {
-            let full = get_canonical_decomp(splits[0]);
-
-            decomp_vals = Vec::new();
-
-            for cap in re.captures_iter(&full) {
-                decomp_vals.push(u32::from_str_radix(&cap[0], 16).unwrap());
-            }
-        }
-
-        if !decomp_vals.is_empty() {
-            let first_char = char::from_u32(decomp_vals[0]).unwrap();
-            let first_cc = get_ccc(first_char) as u8;
-
-            let last_char = char::from_u32(decomp_vals[decomp_vals.len() - 1]).unwrap();
-            let last_cc = get_ccc(last_char) as u8;
-
-            let packed = ((first_cc as u16) << 8) | last_cc as u16;
-            map.insert(code_point, packed);
-        } else {
-            let packed = ((cc as u16) << 8) | cc as u16;
-            map.insert(code_point, packed);
-        }
-    }
-
-    let bytes = bincode::serialize(&map).unwrap();
-    std::fs::write("byte_dump", bytes).unwrap();
-
-    map
-}
-
-fn get_canonical_decomp(code_point: &str) -> String {
-    let data = std::fs::read_to_string("test-data/UnicodeData.txt").unwrap();
-
-    for line in data.lines() {
-        if line.starts_with(code_point) {
-            let decomp = line.split(';').nth(5).unwrap();
-
-            let re = regex!(r"[\dA-F]{4,5}");
-
-            let mut decomp_vals: Vec<u32> = Vec::new();
-
-            for cap in re.captures_iter(decomp) {
-                decomp_vals.push(u32::from_str_radix(&cap[0], 16).unwrap());
-            }
-
-            if decomp_vals.len() > 1 {
-                return decomp.into();
-            }
-
-            if decomp_vals.len() == 1 {
-                let num_as_str = format!("{:04X}", decomp_vals[0]);
-                return get_canonical_decomp(&num_as_str);
-            }
-
-            break;
-        }
-    }
-
-    code_point.into()
 }
 
 #[cfg(test)]
