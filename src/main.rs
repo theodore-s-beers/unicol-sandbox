@@ -179,7 +179,7 @@ fn map_decomps() {
             decomp
                 .into_iter()
                 .flat_map(|x| {
-                    let as_str = format!("{:04X}", x);
+                    let as_str = format!("{x:04X}");
                     get_canonical_decomp(&as_str)
                 })
                 .collect::<Vec<u32>>()
@@ -223,7 +223,7 @@ fn get_canonical_decomp(code_point: &str) -> Vec<u32> {
                 return decomp
                     .into_iter()
                     .flat_map(|x| {
-                        let as_str = format!("{:04X}", x);
+                        let as_str = format!("{x:04X}");
                         get_canonical_decomp(&as_str)
                     })
                     .collect::<Vec<u32>>();
@@ -281,10 +281,7 @@ fn map_fcd() {
             continue;
         }
 
-        let can_decomp = match DECOMP.get(&code_point) {
-            Some(cd) => cd,
-            None => continue,
-        };
+        let Some(can_decomp) = DECOMP.get(&code_point) else { continue };
 
         let decomp_first_ch = char::from_u32(can_decomp[0]).unwrap();
         let first_cc = get_ccc(decomp_first_ch) as u8;
@@ -397,7 +394,7 @@ fn map_low() {
             continue;
         }
 
-        let as_hex = format!("{:04X}", i);
+        let as_hex = format!("{i:04X}");
 
         for line in data.lines() {
             if line.starts_with(&as_hex) {
