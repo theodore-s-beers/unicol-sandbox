@@ -117,9 +117,7 @@ fn conformance(path: &str, options: CollationOptions) {
         }
 
         let comparison = collate_no_tiebreak(&test_string, &max_line, options);
-        if comparison == Ordering::Less {
-            panic!();
-        }
+        assert!(comparison != Ordering::Less);
 
         max_line = test_string;
     }
@@ -281,7 +279,9 @@ fn map_fcd() {
             continue;
         }
 
-        let Some(can_decomp) = DECOMP.get(&code_point) else { continue };
+        let Some(can_decomp) = DECOMP.get(&code_point) else {
+            continue;
+        };
 
         let decomp_first_ch = char::from_u32(can_decomp[0]).unwrap();
         let first_cc = get_ccc(decomp_first_ch) as u8;
